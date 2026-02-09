@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 test.py
+release.py
 
 dist/
 build/
