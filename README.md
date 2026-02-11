@@ -10,7 +10,7 @@
 
 **keybinds** is a Python library for building fully customizable global keybinds and mouse binds using low-level Windows hooks.
 
-It supports chords (`ctrl+e`), sequences (`g,k,i`), rich triggers (press / release / hold / repeat / double tap), strict constraints, suppress/injected policies, and user-defined checks — while keeping the API clean and configuration-driven.
+It supports chords (`ctrl+e`), sequences (`g,k,i`), rich triggers (press / release / hold / repeat / double tap), strict constraints, suppress/injected policies, and user-defined checks, with support for both sync and async callbacks — while keeping the API clean and configuration-driven.
 
 Lightweight. Powered by **[winput](https://github.com/Zuzu-Typ/winput)** for reliable input suppression and precise control.
 
@@ -295,6 +295,34 @@ def inventory():
 def fire():
     print("Bang")
 ```
+
+Decorators automatically use a default hook.
+No `Hook()` needed — just call `keybinds.join()`.
+
+---
+
+## Async callbacks
+
+Callbacks can be `async def`. If a callback returns an awaitable, **keybinds schedules it on an asyncio event loop**.
+
+```python
+import asyncio
+from keybinds import Hook, bind_key
+
+hook = Hook(asyncio_loop=None)
+
+@bind_key("f1", hook=hook)
+async def ping():
+    await asyncio.sleep(0.1)
+    print("async ok")
+
+hook.join()
+```
+
+`asyncio_loop` is optional and depends on your application setup:
+
+* If **keybinds** is the only event loop, just call `keybinds.join()` — no `Hook` required.
+* If your app already runs on an external loop, pass it to `Hook(asyncio_loop=...)` and **do not** call `join()`, since it blocks the thread.
 
 ---
 

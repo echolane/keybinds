@@ -14,7 +14,7 @@ from ._constants import (
     WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
 )
-from ._utils import get_window
+from ._window import get_window
 
 if TYPE_CHECKING:
     from ._state import InputState
@@ -106,15 +106,7 @@ class MouseBind:
         return mx is None or self._fires < mx
 
     def _fire_async(self) -> None:
-        cb = self.callback
-
-        def _run() -> None:
-            try:
-                cb()
-            except Exception:
-                print_exc()
-
-        self._dispatch(_run)
+        self._dispatch(self.callback)
 
     def _actions_for_button(self) -> Tuple[int, int]:
         if self.button == MouseButton.LEFT:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 import time
-from traceback import print_exc
 from typing import Callable, Optional, Set, TYPE_CHECKING
 
 from . import winput
@@ -13,7 +12,7 @@ from ._constants import (
     is_modifier_vk,
 )
 from ._parsing import _ChordSpec, parse_key_expr
-from ._utils import get_window
+from ._window import get_window
 
 if TYPE_CHECKING:
     from ._state import InputState
@@ -151,15 +150,7 @@ class Bind:
         return True
 
     def _fire_async(self) -> None:
-        cb = self.callback
-
-        def _run() -> None:
-            try:
-                cb()
-            except Exception:
-                print_exc()
-
-        self._dispatch(_run)
+        self._dispatch(self.callback)
 
     def handle(self, event: winput.KeyboardEvent, state: "InputState") -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
@@ -293,12 +284,12 @@ class Bind:
             # Single chord triggers
             # -------------------------
 
-            if trig == Trigger.ON_PRESS and full and fresh_down:
+            if trig == Trigger.ON_PRESS and full and fresh_down and (vk_evt in chord.allowed_union):
                 # Fires on fresh keydown while chord is full
                 if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
 
-            elif trig == Trigger.ON_CHORD_COMPLETE and full and fresh_down and not prev_full:
+            elif trig == Trigger.ON_CHORD_COMPLETE and full and fresh_down and not prev_full and (vk_evt in chord.allowed_union):
                 # Fires only on transition NOT_FULL -> FULL
                 if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON

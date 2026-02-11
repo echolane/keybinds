@@ -3,13 +3,16 @@ from __future__ import annotations
 import signal
 import threading
 from contextlib import contextmanager
-from typing import Callable, Optional, Union, Generator
+from typing import Callable, Optional, Union, Generator, TYPE_CHECKING
 
 from ._backend import _GlobalBackend
 from ._dispatcher import _CallbackDispatcher
 from ._keyboard import Bind
 from ._mouse import MouseBind
 from .types import BindConfig, MouseBindConfig, MouseButton
+
+if TYPE_CHECKING:
+    import asyncio
 
 _default_hook: Optional[Hook] = None
 
@@ -38,7 +41,10 @@ def join(hook: Optional[Hook] = None) -> None:
     def handler(sig, frame):
         hook.stop()
 
-    signal.signal(signal.SIGINT, handler)
+    try:
+        signal.signal(signal.SIGINT, handler)
+    except ValueError:  # signal only works in main thread
+        pass
 
     try:
         hook.wait()
@@ -53,6 +59,8 @@ class Hook:
         callback_workers: int = 1,
         default_config: Optional[BindConfig] = None,
         default_mouse_config: Optional[MouseBindConfig] = None,
+        asyncio_loop: "Optional[asyncio.AbstractEventLoop]" = None,
+        on_async_error: Optional[Callable[[BaseException], None]] = None
     ) -> None:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -63,7 +71,7 @@ class Hook:
         self.default_config = default_config
         self.default_mouse_config = default_mouse_config
 
-        self._dispatcher = _CallbackDispatcher(workers=callback_workers)
+        self._dispatcher = _CallbackDispatcher(workers=callback_workers, asyncio_loop=asyncio_loop, on_async_error=on_async_error)
 
         # binds live in this frontend
         self._keyboard_binds: list[Bind] = []
