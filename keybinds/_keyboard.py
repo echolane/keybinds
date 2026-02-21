@@ -6,7 +6,15 @@ from typing import Callable, Optional, Set, TYPE_CHECKING
 
 from . import winput
 
-from .types import Callback, BindConfig, ChordPolicy, SuppressPolicy, InjectedPolicy, Trigger
+from .types import (
+    Callback,
+    BindConfig,
+    ChordPolicy,
+    SuppressPolicy,
+    InjectedPolicy,
+    OrderPolicy,
+    Trigger
+)
 from ._constants import (
     WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
     is_modifier_vk,
@@ -16,6 +24,204 @@ from ._window import get_window
 
 if TYPE_CHECKING:
     from ._state import InputState
+
+
+class _StrictOrderState:
+    """
+    Runtime state for strict ordered-chord matching (one chord / one sequence step).
+
+    Supports two modes:
+    - STRICT_ORDER:
+      any order violation invalidates the whole chord-cycle until all chord keys are released.
+    - STRICT_ORDER_RECOVERABLE:
+      tail rebuild mistakes are recoverable while the locked prefix is still held.
+
+    Model:
+    - Chord order is defined by chord.groups indices: 0, 1, 2, ...
+    - Current pressed chord groups must form a prefix [0..k].
+    - Before first full match:
+      first-seen groups must appear in order (0 -> 1 -> 2 -> ...).
+    - After first full match:
+      a locked prefix is established (all groups except the last one).
+      The user may rebuild only the right-side tail.
+      The locked prefix may shrink only by releasing keys from right to left.
+
+    Examples for Ctrl+Shift+X:
+    - Allowed:
+      * Ctrl+Shift+X
+      * X up -> X down
+      * X up -> Shift up -> Shift down -> X down (Ctrl still held)
+    - Invalid (fatal):
+      * Shift+Ctrl+X
+      * Ctrl up while Shift+X are still held (locked prefix broken)
+    - Invalid (recoverable only in RECOVERABLE mode):
+      * after releasing Shift+X, pressing X before Shift (malformed tail)
+    """
+
+    __slots__ = (
+        "invalid",
+        "seen_groups",
+        "seen_set",
+        "locked_prefix_len",  # None before first success; after success = len(groups)-1 and may shrink
+        "attempt_invalid",  # recoverable local error for current tail rebuild attempt
+    )
+
+    def __init__(self) -> None:
+        self.invalid: bool = False
+        self.attempt_invalid: bool = False
+        self.seen_groups: list[int] = []
+        self.seen_set: Set[int] = set()
+        self.locked_prefix_len: Optional[int] = None
+
+    def reset(self) -> None:
+        self.invalid = False
+        self.attempt_invalid: bool = False
+        self.seen_groups.clear()
+        self.seen_set.clear()
+        self.locked_prefix_len = None
+
+    # ---------- helpers ----------
+    def group_index_for_vk(self, chord: "_ChordSpec", vk: int) -> Optional[int]:
+        for i, g in enumerate(chord.groups):
+            if vk in g:
+                return i
+        return None
+
+    def pressed_group_indices(self, chord: "_ChordSpec", pressed: Set[int]) -> list[int]:
+        out: list[int] = []
+        for i, g in enumerate(chord.groups):
+            if any(vk in pressed for vk in g):
+                out.append(i)
+        return out
+
+    @staticmethod
+    def _is_prefix_indices(idxs: list[int]) -> bool:
+        return idxs == list(range(len(idxs)))
+
+    # ---------- state transitions ----------
+    def on_event(
+        self,
+        chord: "_ChordSpec",
+        pressed: Set[int],
+        *,
+        vk_evt: int,
+        is_up: bool,
+        fresh_down: bool,
+        recoverable: bool = False,
+    ) -> None:
+        """
+        `pressed` must be post-event state.
+
+        Modes:
+        - STRICT (recoverable=False):
+            any order violation invalidates the whole chord-cycle.
+        - STRICT_RECOVERABLE (recoverable=True):
+            tail rebuild mistakes can be retried while a valid locked prefix is still held.
+            Fatal only if locked prefix itself is broken.
+        """
+        if self.invalid:
+            return
+
+        # ---- helpers on current post-event state ----
+        pressed_idxs = self.pressed_group_indices(chord, pressed)   # e.g. [0], [0,1], [0,1,2], [0,2], ...
+        is_prefix = self._is_prefix_indices(pressed_idxs)
+
+        # ---- maintain lock (after first success only) ----
+        # locked_prefix_len means groups [0:locked_prefix_len] are the locked prefix.
+        # It may shrink only as the user releases the tail from the right.
+        if self.locked_prefix_len is not None:
+            if is_prefix and len(pressed_idxs) < self.locked_prefix_len:
+                self.locked_prefix_len = len(pressed_idxs)
+
+        if recoverable and self.locked_prefix_len is not None:
+            # Clear local tail-attempt error only when user has returned to a VALID prefix state
+            # at or above the tail base (or earlier), e.g. [0] for Ctrl+Shift+X after releasing Shift+X.
+            if is_prefix and len(pressed_idxs) <= self.locked_prefix_len:
+                self.attempt_invalid = False
+
+        # ---- prefix invariant handling ----
+        if not is_prefix:
+            # Before first success any non-prefix state is fatal.
+            if self.locked_prefix_len is None:
+                self.invalid = True
+                return
+
+            # After first success:
+            # - If locked prefix is broken -> fatal
+            # - If locked prefix is still intact and only tail is malformed -> recoverable in RECOVERABLE mode
+            prefix_ok = pressed_idxs[: self.locked_prefix_len] == list(range(self.locked_prefix_len))
+
+            if not prefix_ok:
+                # Example: Ctrl+Shift+X, then Ctrl up while Shift+X still held => [1,2]
+                self.invalid = True
+                return
+
+            # Locked prefix still held; malformed tail (e.g. [0,2]) is a local tail-attempt error.
+            if recoverable:
+                self.attempt_invalid = True
+                return
+            else:
+                self.invalid = True
+                return
+
+        # Non-chord key does not affect order bookkeeping beyond prefix checks above.
+        if vk_evt not in chord.allowed_union:
+            return
+
+        gi = self.group_index_for_vk(chord, vk_evt)
+        if gi is None:
+            return
+
+        # ---- keydown semantics ----
+        if fresh_down:
+            if self.locked_prefix_len is None:
+                # Before first success: first-seen groups must arrive in order 0,1,2,...
+                if gi not in self.seen_set:
+                    expected = len(self.seen_groups)
+                    if gi != expected:
+                        self.invalid = True
+                        return
+                    self.seen_groups.append(gi)
+                    self.seen_set.add(gi)
+                # Re-press before first success is tolerated if state invariant is ok.
+                return
+
+            # After first success:
+            # Groups in locked prefix may NOT be re-pressed (they must remain continuously held).
+            if gi < self.locked_prefix_len:
+                self.invalid = True
+                return
+
+            # Tail rebuild order (left-to-right from locked_prefix_len).
+            # We only enforce this when current state is prefix-shaped; malformed tail is handled above.
+            if is_prefix:
+                # post-event pressed is prefix [0..k], so the newly pressed group must be the rightmost (k)
+                expected_gi = len(pressed_idxs) - 1
+                if gi != expected_gi:
+                    if recoverable:
+                        self.attempt_invalid = True
+                    else:
+                        self.invalid = True
+                    return
+
+        # ---- keyup semantics ----
+        # No extra per-key logic needed here beyond:
+        # - prefix handling above
+        # - locked_prefix_len shrink above
+        # - recoverable attempt reset above
+
+    def allows_full(self, chord: "_ChordSpec", pressed: Set[int], *, recoverable: bool = False) -> bool:
+        if self.invalid:
+            return False
+        if recoverable and self.attempt_invalid:
+            return False
+        idxs = self.pressed_group_indices(chord, pressed)
+        return self._is_prefix_indices(idxs)
+
+    def on_full_rising_edge(self, chord: "_ChordSpec") -> None:
+        if self.locked_prefix_len is None:
+            # Lock all but the last group.
+            self.locked_prefix_len = max(0, len(chord.groups) - 1)
 
 
 class Bind:
@@ -63,6 +269,8 @@ class Bind:
         self._release_armed: bool = False
         self._invalidated: bool = False
 
+        self._strict_order = _StrictOrderState()
+
         self._lock = threading.RLock()
 
     def reset(self) -> None:
@@ -78,6 +286,7 @@ class Bind:
         self._release_armed: bool = False
         self._invalidated = False
         self._repeat_active = False
+        self._strict_order.reset()
 
     def _window_ok(self) -> bool:
         if self.window is None:
@@ -152,7 +361,7 @@ class Bind:
     def _fire_async(self) -> None:
         self._dispatch(self.callback)
 
-    def handle(self, event: winput.KeyboardEvent, state: "InputState") -> int:
+    def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
         with self._lock:
             now_ms = int(event.time)
@@ -199,9 +408,31 @@ class Bind:
             is_up = event.action in (WM_KEYUP, WM_SYSKEYUP)
             is_repeat = bool(getattr(event, "_sb_is_repeat", False))
             fresh_down = is_down and not is_repeat
+            vk_evt = int(event.vkCode)
+
+            opol = self.config.constraints.order_policy
+            is_strict = opol in (OrderPolicy.STRICT, OrderPolicy.STRICT_RECOVERABLE)
+            is_recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
+
+            if is_strict:
+                self._strict_order.on_event(
+                    chord,
+                    pressed,
+                    vk_evt=vk_evt,
+                    is_up=is_up,
+                    fresh_down=fresh_down,
+                    recoverable=is_recoverable
+                )
 
             prev_full = self._was_full
             full = self._match_chord(chord, pressed)
+            if is_strict and full:
+                if not self._strict_order.allows_full(chord, pressed, recoverable=is_recoverable):
+                    full = False
+
+            if is_strict and full and not prev_full:
+                self._strict_order.on_full_rising_edge(chord)
+
             self._armed = full
 
             # Track activation cycle: once chord was fully pressed.
@@ -218,8 +449,6 @@ class Bind:
                 if vk in pressed:
                     any_chord_key_pressed = True
                     break
-
-            vk_evt = int(event.vkCode)
 
             flags = winput.WP_CONTINUE
 
@@ -273,11 +502,13 @@ class Bind:
                         self.reset()
                     else:
                         self._seq_index += 1
+                        self._strict_order.reset()
 
                 self._was_full = full
                 if not any_chord_key_pressed:
                     self._had_full = False
                     self._release_armed = False
+                    self._strict_order.reset()
                 return flags
 
             # -------------------------
@@ -310,6 +541,7 @@ class Bind:
                     # end cycle
                     self._had_full = False
                     self._release_armed = False
+                    self._strict_order.reset()
 
             elif trig == Trigger.ON_CLICK:
                 if full and fresh_down:
@@ -379,6 +611,7 @@ class Bind:
             if not any_chord_key_pressed:
                 self._had_full = False
                 self._release_armed = False
+                self._strict_order.reset()
 
             self._was_full = full
             return flags

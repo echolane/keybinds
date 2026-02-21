@@ -39,8 +39,9 @@ class ChordPolicy(Enum):
 
 class OrderPolicy(Enum):
     """Whether key press order matters."""
-    ANY_ORDER = auto()
-    STRICT_ORDER = auto()
+    ANY = auto()
+    STRICT = auto()
+    STRICT_RECOVERABLE = auto()
 
 
 class InjectedPolicy(Enum):
@@ -65,9 +66,8 @@ class Timing:
 @dataclass(frozen=True)
 class Constraints:
     chord_policy: ChordPolicy = ChordPolicy.IGNORE_EXTRA_MODIFIERS
-    order_policy: OrderPolicy = OrderPolicy.ANY_ORDER
+    order_policy: OrderPolicy = OrderPolicy.ANY
     max_fires: Optional[int] = None
-    require_window_focus: bool = False
     ignore_keys: Set[int] = field(default_factory=set)
 
 

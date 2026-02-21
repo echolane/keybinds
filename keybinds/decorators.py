@@ -14,7 +14,7 @@ from .bind import get_default_hook, Hook
 
 
 def bind_key(
-    key: str,
+    keys: Union[str, List[str]],
     *,
     hwnd: Optional[int] = None,
     trigger_on_release: bool = False,
@@ -23,19 +23,22 @@ def bind_key(
     hook: Optional[Hook] = None
 ) -> Callable[[Callback], Callback]:
     def decorator(func: Callback) -> Callback:
-        cfg = config
-        if cfg is None:
-            cfg = BindConfig(
+        nonlocal keys, config, hook
+        keys = keys if isinstance(keys, list) else [keys]
+        if config is None:
+            config = BindConfig(
                 trigger=Trigger.ON_RELEASE if trigger_on_release else Trigger.ON_PRESS,
                 suppress=SuppressPolicy.WHEN_MATCHED if suppress else SuppressPolicy.NEVER,
             )
 
-        nonlocal hook
         if hook is None:
             hook = get_default_hook()
 
-        b = hook.bind(key, func, config=cfg, hwnd=hwnd)
-        setattr(func, "bind", b)
+        binds = []
+        for key in keys:
+            b = hook.bind(key, func, config=config, hwnd=hwnd)
+            binds.append(b)
+        setattr(func, "bind", binds[0] if len(binds) == 1 else binds)
         return func
     return decorator
 

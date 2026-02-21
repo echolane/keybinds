@@ -77,16 +77,30 @@ class Hook:
         self._keyboard_binds: list[Bind] = []
         self._mouse_binds: list[MouseBind] = []
 
-        # snapshots used by backend hot path (tuples are cheap to iterate)
+        # snapshots used by backend hot path
         self._keyboard_snapshot: tuple[Bind, ...] = ()
         self._mouse_snapshot: tuple[MouseBind, ...] = ()
 
-        # Attach to global backend (installs hooks once)
+        # Attach to global backend
         _GlobalBackend.instance().register(self)
 
     # -------------------------
     # public API
     # -------------------------
+
+    def __enter__(self) -> Hook:
+        self.resume()
+        if self._dispatcher.stopped:
+            self._dispatcher.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.stop()
+        self.close()
+
+    @property
+    def asyncio_loop(self) -> "Optional[asyncio.AbstractEventLoop]":
+        return self._dispatcher.asyncio_loop
 
     def bind(self, expr: str, callback: Callable[[], None], *, config: Optional[BindConfig] = None, hwnd=None) -> Bind:
         cfg = config or self.default_config or BindConfig()

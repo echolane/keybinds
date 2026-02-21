@@ -8,12 +8,10 @@ Manual test: press keys and click mouse, watch console output.
 
 import time
 
-from keybinds.bind import Hook
-from keybinds.types import SuppressPolicy
+from keybinds import Hook, SuppressPolicy, BindConfig
 from keybinds.presets import (
     press, release, chord_released, click, hold, repeat, double_tap, sequence,
-    mouse_press, mouse_release, mouse_hold, mouse_repeat, mouse_double_tap,
-    with_,
+    mouse_press, mouse_release, mouse_hold, mouse_repeat, mouse_double_tap
 )
 
 hook = Hook()
@@ -47,10 +45,7 @@ hook.bind("d", lambda: hit("d double tap"), config=double_tap(300))
 hook.bind("g,k,i", lambda: hit("sequence g,k,i"), config=sequence(600))
 
 # “Partial override”: tweak a preset
-FAST_REPEAT_SUPPRESSED = with_(
-    repeat(delay_ms=180, interval_ms=60),
-    suppress=SuppressPolicy.WHILE_ACTIVE,
-)
+FAST_REPEAT_SUPPRESSED = repeat(delay_ms=180, interval_ms=60) + BindConfig(suppress=SuppressPolicy.WHILE_ACTIVE)
 hook.bind("space", lambda: hit("space fast repeat (while-active suppressed)"), config=FAST_REPEAT_SUPPRESSED)
 
 # Mouse
@@ -68,7 +63,6 @@ hook.bind_mouse(
 
 print("Presets example running. Try:")
 print("  KB: Ctrl+E, Ctrl+R, Ctrl+T, Ctrl+G, tap/hold K, hold J, double-tap D, sequence G,K,I, hold Space")
-print("  Mouse: left click, hold right, hold left, double-click left, middle click (release)")
+print("  Mouse: left click, hold right, double-click left, middle click (release)")
 print("Ctrl+C to exit.")
-while True:
-    time.sleep(1)
+hook.join()
