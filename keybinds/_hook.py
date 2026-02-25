@@ -134,6 +134,18 @@ class Hook:
                 return
             self._mouse_snapshot = tuple(self._mouse_binds)
 
+    def _reset_runtime_states(self) -> None:
+        for b in self._keyboard_snapshot:
+            try:
+                b.reset()
+            except Exception:
+                pass
+        for b in self._mouse_snapshot:
+            try:
+                b.reset()
+            except Exception:
+                pass
+
     def pause(self) -> None:
         """Pause the hook (no callbacks will be called until resume() is called).
 
@@ -141,7 +153,9 @@ class Hook:
         """
         with self._lock:
             self._pause_count += 1
-            self._paused = True
+            if self._pause_count == 1:
+                self._paused = True
+                self._reset_runtime_states()
 
     def resume(self) -> None:
         """Resume the hook (callbacks will be called again after calling pause()).
@@ -154,6 +168,7 @@ class Hook:
             self._pause_count -= 1
             if self._pause_count == 0:
                 self._paused = False
+                self._reset_runtime_states()
 
     def is_paused(self) -> bool:
         """Get whether the hook is currently paused.

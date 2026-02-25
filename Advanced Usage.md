@@ -490,6 +490,14 @@ Controls whether keyboard chord keys must be pressed in the defined order.
 
 Applies only to keyboard chords (not sequences, not mouse binds).
 
+### `FocusPolicy`
+Controls what happens to bind runtime state when a window-scoped bind (`hwnd=...`) loses focus.
+
+- `CANCEL_ON_BLUR` — reset the bind state on focus loss (default). This cancels active hold/repeat cycles, sequence progress, tap counters, and chord progress.
+- `PAUSE_ON_BLUR` — pause active repeat/hold behavior on blur without a full reset, so matching can continue/resume when focus returns depending on trigger and current input state.
+
+Typical choice: `CANCEL_ON_BLUR` for predictable app/window-local hotkeys.
+
 ### Combining policies
 
 These policies are orthogonal:
@@ -498,6 +506,7 @@ These policies are orthogonal:
 - `InjectedPolicy` → physical vs synthetic filtering
 - `ChordPolicy` → extra-key tolerance
 - `OrderPolicy` → press order requirements
+- `FocusPolicy` → blur behavior for window-scoped binds
 
 ```python
 from keybinds.types import (
@@ -515,6 +524,7 @@ hook.bind(
     config=BindConfig(
         suppress=SuppressPolicy.WHEN_MATCHED,      # block only on successful match
         injected=InjectedPolicy.IGNORE,            # physical input only
+        focus=FocusPolicy.CANCEL_ON_BLUR,          # default for window-scoped binds (hwnd=...)
         constraints=Constraints(
             chord_policy=ChordPolicy.IGNORE_EXTRA_MODIFIERS,  # tolerate extra modifiers
             order_policy=OrderPolicy.STRICT_RECOVERABLE,      # ordered chord with recoverable tail rebuild

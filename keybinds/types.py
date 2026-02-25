@@ -51,6 +51,12 @@ class InjectedPolicy(Enum):
     ONLY = auto()     # react only to injected events
 
 
+class FocusPolicy(Enum):
+    """What to do when the window loses focus."""
+    CANCEL_ON_BLUR = auto()
+    PAUSE_ON_BLUR = auto()
+
+
 @dataclass(frozen=True)
 class Timing:
     chord_timeout_ms: int = 350
@@ -92,8 +98,11 @@ class Checks:
 @dataclass(frozen=True)
 class BindConfig:
     trigger: Trigger = Trigger.ON_PRESS
+
     suppress: SuppressPolicy = SuppressPolicy.NEVER
     injected: InjectedPolicy = InjectedPolicy.ALLOW
+    focus: FocusPolicy = FocusPolicy.CANCEL_ON_BLUR
+
     timing: Timing = field(default_factory=Timing)
     constraints: Constraints = field(default_factory=Constraints)
     checks: Checks = field(default_factory=Checks)
@@ -113,11 +122,17 @@ class MouseButton(Enum):
 @dataclass(frozen=True)
 class MouseBindConfig:
     trigger: Trigger = Trigger.ON_CLICK
+
     suppress: SuppressPolicy = SuppressPolicy.NEVER
     injected: InjectedPolicy = InjectedPolicy.ALLOW
+    focus: FocusPolicy = FocusPolicy.CANCEL_ON_BLUR
+
     timing: Timing = field(default_factory=Timing)
     constraints: Constraints = field(default_factory=Constraints)
     checks: Checks = field(default_factory=Checks)
+
+    def __post_init__(self):
+        object.__setattr__(self, "checks", Checks.coerce(self.checks))
 
 
 # =========================================================
@@ -202,6 +217,9 @@ def merge_bind_soft(lhs: BindConfig, rhs: BindConfig) -> BindConfig:
     if rhs.injected != _DEFAULT_BIND.injected:
         out = replace(out, injected=rhs.injected)
 
+    if rhs.focus != _DEFAULT_BIND.focus:
+        out = replace(out, focus=rhs.focus)
+
     out = replace(out, timing=_merge_dc_soft(out.timing, rhs.timing, _DEFAULT_TIMING))
     out = replace(out, constraints=_merge_dc_soft(out.constraints, rhs.constraints, _DEFAULT_CONSTRAINTS))
     out = replace(out, checks=_merge_dc_soft(out.checks, rhs.checks, _DEFAULT_CHECKS))
@@ -236,6 +254,9 @@ def merge_mouse_soft(lhs: MouseBindConfig, rhs: MouseBindConfig) -> MouseBindCon
 
     if rhs.injected != _DEFAULT_MOUSE.injected:
         out = replace(out, injected=rhs.injected)
+
+    if rhs.focus != _DEFAULT_MOUSE.focus:
+        out = replace(out, focus=rhs.focus)
 
     out = replace(out, timing=_merge_dc_soft(out.timing, rhs.timing, _DEFAULT_TIMING))
     out = replace(out, constraints=_merge_dc_soft(out.constraints, rhs.constraints, _DEFAULT_CONSTRAINTS))

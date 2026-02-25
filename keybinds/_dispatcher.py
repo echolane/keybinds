@@ -72,6 +72,7 @@ class _CallbackDispatcher:
 
     def submit(self, fn: Callable[[], None]) -> None:
         self._q.put(fn)
+
     def _worker(self) -> None:
         while True:
             fn = self._q.get()

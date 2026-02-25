@@ -62,8 +62,16 @@ class _GlobalBackend:
 
     def register(self, hook_obj) -> None:
         """Register a Hook frontend and ensure backend thread is running."""
+        stop_dispatcher = hook_obj._dispatcher.stop
+
+        def _on_hook_gc(_wr):
+            try:
+                stop_dispatcher()
+            except Exception:
+                pass
+
         with self._hooks_lock:
-            self._hooks.append(weakref.ref(hook_obj))
+            self._hooks.append(weakref.ref(hook_obj, _on_hook_gc))
 
         self._ensure_thread()
 

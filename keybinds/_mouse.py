@@ -14,7 +14,7 @@ from ._constants import (
     WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
 )
-from ._window import get_window
+from ._base_bind import BaseBind
 
 if TYPE_CHECKING:
     from ._state import InputState
@@ -42,7 +42,7 @@ def _normalize_mouse_button(btn: object) -> MouseButton:
     raise ValueError(f"Unknown mouse button: {btn!r}")
 
 
-class MouseBind:
+class MouseBind(BaseBind):
     def __init__(
         self,
         button: Union[MouseButton, str],
@@ -50,42 +50,15 @@ class MouseBind:
         *,
         config: Optional[MouseBindConfig] = None,
         hwnd: Optional[int] = None,
-        dispatch: Optional[Callable[[Callable[[], None]], None]] = None,
+        dispatch: Optional[Callable[[Callback], None]] = None,
     ) -> None:
+        super().__init__(callback, config=config or MouseBindConfig(), hwnd=hwnd, dispatch=dispatch)
         self.button = _normalize_mouse_button(button)
-        self.callback = callback
-        self.config = config or MouseBindConfig()
-        self.window = get_window(hwnd)
-        self._dispatch = dispatch or (lambda fn: fn())
-
-        self._focus_cache: bool = True
-        self._focus_last_check_ms: int = 0
 
         self._down_ms: Optional[int] = None
         self._tap_count: int = 0
         self._tap_last_ms: int = 0
-        self._repeat_active: bool = False
         self._armed: bool = False
-
-        self._fires: int = 0
-        self._last_fire_ms: int = 0
-        self._lock = threading.RLock()
-
-        # for ON_RELEASE + WHEN_MATCHED paired suppress
-        self._suppress_next_up: bool = False
-
-    def _window_ok(self) -> bool:
-        if self.window is None:
-            return True
-        now_ms = int(time.monotonic() * 1000)
-        if (now_ms - self._focus_last_check_ms) < self.config.timing.window_focus_cache_ms:
-            return self._focus_cache
-        self._focus_last_check_ms = now_ms
-        try:
-            self._focus_cache = bool(self.window.is_focused())
-        except Exception:
-            self._focus_cache = False
-        return self._focus_cache
 
     def _checks_ok(self, event: winput.MouseEvent, state: InputState) -> bool:
         for pred in self.config.checks:
@@ -96,17 +69,6 @@ class MouseBind:
                 print_exc()
                 return False
         return True
-
-    def _cooldown_ok(self, now_ms: int) -> bool:
-        cd = self.config.timing.cooldown_ms
-        return cd <= 0 or (now_ms - self._last_fire_ms) >= cd
-
-    def _max_fires_ok(self) -> bool:
-        mx = self.config.constraints.max_fires
-        return mx is None or self._fires < mx
-
-    def _fire_async(self) -> None:
-        self._dispatch(self.callback)
 
     def _actions_for_button(self) -> Tuple[int, int]:
         if self.button == MouseButton.LEFT:
@@ -130,7 +92,15 @@ class MouseBind:
             return which == 2
         return True
 
-    def handle(self, event: winput.MouseEvent, state: "InputState") -> int:
+    def reset(self) -> None:
+        self._down_ms = None
+        self._tap_count = 0
+        self._tap_last_ms = 0
+        self._repeat_active = False
+        self._hold_token += 1
+        self._armed = False
+
+    def handle(self, event: winput.MouseEvent, state: InputState) -> int:
         # Mouse move/wheel is extremely frequent; this is called only after Hook filtered.
         with self._lock:
             now_ms = int(event.time)
@@ -188,7 +158,7 @@ class MouseBind:
                 if self._cooldown_ok(ts_ms) and self._max_fires_ok():
                     self._fires += 1
                     self._last_fire_ms = ts_ms
-                    self._fire_async()
+                    self._fire()
                     return True
                 return False
 
@@ -213,12 +183,21 @@ class MouseBind:
             elif trig == Trigger.ON_HOLD and is_down:
                 hold_ms = self.config.timing.hold_ms
 
+                self._hold_token += 1
+                token = self._hold_token
+
                 def _hold() -> None:
                     time.sleep(max(0, hold_ms) / 1000.0)
                     with self._lock:
-                        if self._armed:
-                            now2 = int(time.monotonic() * 1000)
-                            fire_if_allowed(now2)
+                        if token != self._hold_token:
+                            return
+                        if not self._armed:
+                            return
+                        if self.window is not None and not self._window_ok(force=True):
+                            return
+
+                        now2 = int(time.monotonic() * 1000)
+                        fire_if_allowed(now2)
 
                 threading.Thread(target=_hold, daemon=True).start()
 
@@ -234,6 +213,10 @@ class MouseBind:
                             if not self._armed:
                                 self._repeat_active = False
                                 break
+                            if self.window is not None and not self._window_ok(force=True):
+                                self._repeat_active = False
+                                break
+
                             now2 = int(time.monotonic() * 1000)
                             fire_if_allowed(now2)
                         time.sleep(interval_s)

@@ -20,7 +20,7 @@ from ._constants import (
     is_modifier_vk,
 )
 from ._parsing import _ChordSpec, parse_key_expr
-from ._window import get_window
+from ._base_bind import BaseBind
 
 if TYPE_CHECKING:
     from ._state import InputState
@@ -81,13 +81,13 @@ class _StrictOrderState:
         self.locked_prefix_len = None
 
     # ---------- helpers ----------
-    def group_index_for_vk(self, chord: "_ChordSpec", vk: int) -> Optional[int]:
+    def group_index_for_vk(self, chord: _ChordSpec, vk: int) -> Optional[int]:
         for i, g in enumerate(chord.groups):
             if vk in g:
                 return i
         return None
 
-    def pressed_group_indices(self, chord: "_ChordSpec", pressed: Set[int]) -> list[int]:
+    def pressed_group_indices(self, chord: _ChordSpec, pressed: Set[int]) -> list[int]:
         out: list[int] = []
         for i, g in enumerate(chord.groups):
             if any(vk in pressed for vk in g):
@@ -210,7 +210,7 @@ class _StrictOrderState:
         # - locked_prefix_len shrink above
         # - recoverable attempt reset above
 
-    def allows_full(self, chord: "_ChordSpec", pressed: Set[int], *, recoverable: bool = False) -> bool:
+    def allows_full(self, chord: _ChordSpec, pressed: Set[int], *, recoverable: bool = False) -> bool:
         if self.invalid:
             return False
         if recoverable and self.attempt_invalid:
@@ -218,13 +218,13 @@ class _StrictOrderState:
         idxs = self.pressed_group_indices(chord, pressed)
         return self._is_prefix_indices(idxs)
 
-    def on_full_rising_edge(self, chord: "_ChordSpec") -> None:
+    def on_full_rising_edge(self, chord: _ChordSpec) -> None:
         if self.locked_prefix_len is None:
             # Lock all but the last group.
             self.locked_prefix_len = max(0, len(chord.groups) - 1)
 
 
-class Bind:
+class Bind(BaseBind):
     """Policy-driven keyboard bind."""
 
     def __init__(
@@ -234,35 +234,24 @@ class Bind:
         *,
         config: Optional[BindConfig] = None,
         hwnd: Optional[int] = None,
-        dispatch: Optional[Callable[[Callable[[], None]], None]] = None,
+        dispatch: Optional[Callable[[Callback], None]] = None,
     ) -> None:
+        super().__init__(callback, config=config or BindConfig(), hwnd=hwnd, dispatch=dispatch)
         self.expr = expr
-        self.callback = callback
-        self.config = config or BindConfig()
         self.steps = parse_key_expr(expr)
         self.is_sequence = len(self.steps) > 1
-        self.window = get_window(hwnd)
-        self._dispatch = dispatch or (lambda fn: fn())
-
-        # focus caching
-        self._focus_cache: bool = True
-        self._focus_last_check_ms: int = 0
 
         # runtime state
         self._seq_index: int = 0
         self._seq_last_ms: int = 0
 
-        self._last_fire_ms: int = 0
         self._last_event_ms: int = 0
-        self._fires: int = 0
 
         self._click_down_ms: Optional[int] = None
-        self._repeat_active: bool = False
         self._armed: bool = False
         self._was_full: bool = False
         self._tap_count: int = 0
         self._tap_last_ms: int = 0
-        self._hold_token: int = 0
 
         # for ON_CHORD_RELEASED semantics
         self._had_full: bool = False
@@ -271,15 +260,13 @@ class Bind:
 
         self._strict_order = _StrictOrderState()
 
-        self._lock = threading.RLock()
-
     def reset(self) -> None:
         self._seq_index = 0
         self._seq_last_ms = 0
         self._click_down_ms = None
         self._tap_count = 0
         self._tap_last_ms = 0
-        self._hold_token = 0
+        self._hold_token += 1
         self._armed = False
         self._was_full = False
         self._had_full = False
@@ -288,39 +275,9 @@ class Bind:
         self._repeat_active = False
         self._strict_order.reset()
 
-    def _window_ok(self) -> bool:
-        if self.window is None:
-            return True
-        now_ms = int(time.monotonic() * 1000)
-        if (now_ms - self._focus_last_check_ms) < self.config.timing.window_focus_cache_ms:
-            return self._focus_cache
-        self._focus_last_check_ms = now_ms
-        try:
-            self._focus_cache = bool(self.window.is_focused())
-        except Exception:
-            self._focus_cache = False
-        return self._focus_cache
-
-    def _checks_ok(self, event: winput.KeyboardEvent, state: InputState) -> bool:
-        for pred in self.config.checks:
-            try:
-                if not pred(event, state):
-                    return False
-            except Exception:
-                return False
-        return True
-
-    def _cooldown_ok(self, now_ms: int) -> bool:
-        cd = self.config.timing.cooldown_ms
-        return cd <= 0 or (now_ms - self._last_fire_ms) >= cd
-
     def _debounce_ok(self, now_ms: int) -> bool:
         db = self.config.timing.debounce_ms
         return db <= 0 or (now_ms - self._last_event_ms) >= db
-
-    def _max_fires_ok(self) -> bool:
-        mx = self.config.constraints.max_fires
-        return mx is None or self._fires < mx
 
     def _step_timeout_ok(self, now_ms: int) -> bool:
         to = self.config.timing.chord_timeout_ms
@@ -358,16 +315,12 @@ class Bind:
                 return False
         return True
 
-    def _fire_async(self) -> None:
-        self._dispatch(self.callback)
-
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
         with self._lock:
             now_ms = int(event.time)
 
             if self.window is not None and not self._window_ok():
-                self.reset()
                 return winput.WP_CONTINUE
 
             if self.config.checks.predicates and not self._checks_ok(event, state):
@@ -487,7 +440,7 @@ class Bind:
                 if self._cooldown_ok(ts_ms) and self._max_fires_ok():
                     self._fires += 1
                     self._last_fire_ms = ts_ms
-                    self._fire_async()
+                    self._fire()
                     return True
                 return False
 
@@ -565,7 +518,7 @@ class Bind:
                     def _hold() -> None:
                         time.sleep(max(0, hold_ms) / 1000.0)
                         with self._lock:
-                            if token != self._hold_token or not self._window_ok():
+                            if token != self._hold_token or not self._window_ok(force=True):
                                 return
                             if self._match_chord(chord0, pressed0):
                                 now2 = int(time.monotonic() * 1000)
@@ -585,7 +538,7 @@ class Bind:
                         time.sleep(max(0.0, delay_s))
                         while True:
                             with self._lock:
-                                if not self._match_chord(chord0, pressed0) or not self._window_ok():
+                                if not self._match_chord(chord0, pressed0) or not self._window_ok(force=True):
                                     self._repeat_active = False
                                     break
                                 now2 = int(time.monotonic() * 1000)
