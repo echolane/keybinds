@@ -357,11 +357,11 @@ class Bind(BaseBind):
                 else:
                     pressed = state.pressed_keys
 
+            vk_evt = int(event.vkCode)
             is_down = event.action in (WM_KEYDOWN, WM_SYSKEYDOWN)
             is_up = event.action in (WM_KEYUP, WM_SYSKEYUP)
             is_repeat = bool(getattr(event, "_sb_is_repeat", False))
-            fresh_down = is_down and not is_repeat
-            vk_evt = int(event.vkCode)
+            fresh_down = is_down and (self.config.constraints.allow_os_key_repeat or not is_repeat)
 
             opol = self.config.constraints.order_policy
             is_strict = opol in (OrderPolicy.STRICT, OrderPolicy.STRICT_RECOVERABLE)

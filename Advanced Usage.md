@@ -176,6 +176,27 @@ hook.stop()        # signal wait()/join() to exit
 hook.close()       # detach this frontend + stop callback workers
 ```
 
+### Auto-start behavior
+
+By default, `Hook()` starts automatically on initialization.
+
+You can disable this:
+
+```python
+from keybinds.bind import Hook
+
+hook = Hook(auto_start=False)
+hook.bind("f1", lambda: print("hi"))
+
+hook.start()   # manually start the dispatcher
+hook.join()
+```
+
+* `auto_start=True` (default) — dispatcher starts on init.
+* `auto_start=False` — you must call `start()` manually.
+
+Calling `start()` on an already running hook is safe (no-op).
+
 ### `wait(timeout)` for polling
 
 ```python
@@ -400,6 +421,23 @@ Example (`ctrl+shift+x`):
 * Valid: `Ctrl → Shift → X`
 * Invalid in `STRICT`: `Shift → Ctrl → X`
 * In `STRICT_RECOVERABLE`, tail rebuild mistakes after first match are recoverable while the prefix remains held.
+
+---
+
+
+## `Constraints.allow_os_key_repeat`
+
+Whether OS-generated repeated **keydown** events (while a key is held) are treated as fresh presses.
+
+* `False` (default) — ignore OS key-repeat.
+* `True` — allow OS key-repeat (e.g., `ON_PRESS` may fire repeatedly).
+
+```python
+from keybinds.types import BindConfig, Constraints
+
+cfg = BindConfig(constraints=Constraints(allow_os_key_repeat=True))
+hook.bind("g", lambda: print("repeat!"), config=cfg)
+```
 
 ---
 
@@ -743,15 +781,19 @@ def reload():
 
 ---
 
-## Mouse decorator with multiple buttons (single callback)
+## Multiple inputs (single callback)
 
-`bind_mouse` can accept a list and creates one bind per button.
+Decorators can accept a list of inputs and create one bind per item.
 
 ```python
-from keybinds.decorators import bind_mouse
+from keybinds.decorators import bind_key, bind_mouse
+
+@bind_key(["ctrl+a", "ctrl+b"])
+def handle_shortcuts():
+    print("Ctrl+A or Ctrl+B")
 
 @bind_mouse(["left", "right"])
-def both_buttons():
+def handle_mouse():
     print("LMB or RMB")
 ```
 

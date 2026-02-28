@@ -11,6 +11,7 @@ from .types import (
     ChordPolicy,
     OrderPolicy,
     FocusPolicy,
+    InjectedPolicy,
     Timing,
     Constraints,
     Checks,
@@ -27,10 +28,10 @@ from . import presets
 
 from ._constants import register_key_token
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 __all__ = [
-    "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy", "FocusPolicy",
+    "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy",
     "Timing","Constraints","Checks","BindConfig",
     "MouseButton","MouseBindConfig","Callback","Predicate",
     "Bind","MouseBind","Hook","get_default_hook","set_default_hook","join",

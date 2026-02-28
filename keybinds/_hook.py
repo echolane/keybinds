@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import signal
 import threading
 from contextlib import contextmanager
 from typing import Callable, Optional, Union, Generator, TYPE_CHECKING
@@ -38,14 +37,6 @@ def join(hook: Optional[Hook] = None) -> None:
     if hook is None:
         hook = get_default_hook()
 
-    def handler(sig, frame):
-        hook.stop()
-
-    try:
-        signal.signal(signal.SIGINT, handler)
-    except ValueError:  # signal only works in main thread
-        pass
-
     try:
         hook.wait()
     finally:
@@ -60,10 +51,12 @@ class Hook:
         default_config: Optional[BindConfig] = None,
         default_mouse_config: Optional[MouseBindConfig] = None,
         asyncio_loop: "Optional[asyncio.AbstractEventLoop]" = None,
-        on_async_error: Optional[Callable[[BaseException], None]] = None
+        on_async_error: Optional[Callable[[BaseException], None]] = None,
+        auto_start: bool = True
     ) -> None:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._started = False
 
         self._pause_count = 0
         self._paused = False
@@ -81,26 +74,27 @@ class Hook:
         self._keyboard_snapshot: tuple[Bind, ...] = ()
         self._mouse_snapshot: tuple[MouseBind, ...] = ()
 
-        # Attach to global backend
-        _GlobalBackend.instance().register(self)
+        if auto_start:
+            self.start()
 
     # -------------------------
     # public API
     # -------------------------
 
     def __enter__(self) -> Hook:
-        self.resume()
-        if self._dispatcher.stopped:
-            self._dispatcher.start()
+        self.start()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.stop()
         self.close()
 
     @property
     def asyncio_loop(self) -> "Optional[asyncio.AbstractEventLoop]":
         return self._dispatcher.asyncio_loop
+
+    @property
+    def started(self) -> bool:
+        return self._started
 
     def bind(self, expr: str, callback: Callable[[], None], *, config: Optional[BindConfig] = None, hwnd=None) -> Bind:
         cfg = config or self.default_config or BindConfig()
@@ -175,7 +169,8 @@ class Hook:
 
         Returns True if the hook is paused, False otherwise.
         """
-        return self._paused
+        with self._lock:
+            return self._paused
 
     @contextmanager
     def paused(self) -> Generator[None, None, None]:
@@ -214,22 +209,36 @@ class Hook:
         except KeyboardInterrupt:
             return True
 
+    def set_default(self) -> None:
+        """Alias for set_default_hook(hook)."""
+        set_default_hook(self)
+
     def join(self) -> None:
         """Block until the hook is stopped."""
         join(self)
 
+    def start(self) -> None:
+        """Start the hook (register to the backend, start callback dispatcher)."""
+        if not self.started:
+            self._started = True
+            _GlobalBackend.instance().register(self)
+            if self._dispatcher.stopped:
+                self._dispatcher.start()
+
     def close(self) -> None:
-        # just detach this frontend; backend keeps running if others exist
-        _GlobalBackend.instance().unregister(self)
-        self._dispatcher.stop()
+        if self.started:
+            self._started = False
+            _GlobalBackend.instance().unregister(self)
+            self._dispatcher.stop()
 
     # -------------------------
     # called by backend
     # -------------------------
 
     def _handle_keyboard_event(self, event, state) -> int:
-        if self._paused:
-            return 0
+        with self._lock:
+            if self._paused:
+                return 0
 
         snap = self._keyboard_snapshot
         if not snap:
@@ -240,8 +249,9 @@ class Hook:
         return flags
 
     def _handle_mouse_event(self, event, state) -> int:
-        if self._paused:
-            return 0
+        with self._lock:
+            if self._paused:
+                return 0
 
         snap = self._mouse_snapshot
         if not snap:

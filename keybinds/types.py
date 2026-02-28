@@ -73,6 +73,7 @@ class Timing:
 class Constraints:
     chord_policy: ChordPolicy = ChordPolicy.IGNORE_EXTRA_MODIFIERS
     order_policy: OrderPolicy = OrderPolicy.ANY
+    allow_os_key_repeat: bool = False
     max_fires: Optional[int] = None
     ignore_keys: Set[int] = field(default_factory=set)
 
