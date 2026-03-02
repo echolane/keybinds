@@ -277,6 +277,8 @@ from keybinds.bind import Hook
 
 custom = Hook()
 keybinds.set_default_hook(custom)
+# OR:
+custom.set_default()
 ```
 
 Now decorators without `hook=...` will attach to `custom`.

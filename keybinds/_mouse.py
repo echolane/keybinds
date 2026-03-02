@@ -56,6 +56,7 @@ class MouseBind(BaseBind):
         self.button = _normalize_mouse_button(button)
 
         self._down_ms: Optional[int] = None
+        self._press_suppress_up: bool = False
         self._tap_count: int = 0
         self._tap_last_ms: int = 0
         self._armed: bool = False
@@ -94,9 +95,9 @@ class MouseBind(BaseBind):
 
     def reset(self) -> None:
         self._down_ms = None
+        self._press_suppress_up = False
         self._tap_count = 0
         self._tap_last_ms = 0
-        self._repeat_active = False
         self._hold_token += 1
         self._armed = False
 
@@ -105,7 +106,7 @@ class MouseBind(BaseBind):
         with self._lock:
             now_ms = int(event.time)
 
-            if self.window is not None and not self._window_ok():
+            if not self._window_ok():
                 return winput.WP_CONTINUE
             if self.config.checks.predicates and not self._checks_ok(event, state):
                 return winput.WP_CONTINUE
@@ -135,7 +136,6 @@ class MouseBind(BaseBind):
                 self._armed = True
             if is_up:
                 self._armed = False
-                self._repeat_active = False
 
             flags = winput.WP_CONTINUE
             sup = self.config.suppress
@@ -152,6 +152,10 @@ class MouseBind(BaseBind):
                 if self._armed or was_armed:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
 
+            elif self.config.suppress == SuppressPolicy.WHEN_MATCHED and is_up and self._press_suppress_up:
+                flags |= winput.WP_DONT_PASS_INPUT_ON
+                self._press_suppress_up = False
+
             trig = self.config.trigger
 
             def fire_if_allowed(ts_ms: int) -> bool:
@@ -165,6 +169,7 @@ class MouseBind(BaseBind):
             if trig == Trigger.ON_PRESS and is_down:
                 if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    self._press_suppress_up = True  # button up suppress
 
             elif trig == Trigger.ON_RELEASE and is_up:
                 if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
@@ -193,7 +198,7 @@ class MouseBind(BaseBind):
                             return
                         if not self._armed:
                             return
-                        if self.window is not None and not self._window_ok(force=True):
+                        if not self._window_ok(force=True):
                             return
 
                         now2 = int(time.monotonic() * 1000)
@@ -201,20 +206,18 @@ class MouseBind(BaseBind):
 
                 threading.Thread(target=_hold, daemon=True).start()
 
-            elif trig == Trigger.ON_REPEAT and is_down and not self._repeat_active:
-                self._repeat_active = True
+            elif trig == Trigger.ON_REPEAT and is_down:
                 delay_s = max(self.config.timing.hold_ms, self.config.timing.repeat_delay_ms) / 1000.0
                 interval_s = max(1, self.config.timing.repeat_interval_ms) / 1000.0
+
+                self._hold_token += 1
+                token = self._hold_token
 
                 def _repeat() -> None:
                     time.sleep(max(0.0, delay_s))
                     while True:
                         with self._lock:
-                            if not self._armed:
-                                self._repeat_active = False
-                                break
-                            if self.window is not None and not self._window_ok(force=True):
-                                self._repeat_active = False
+                            if token != self._hold_token or not self._armed or not self._window_ok(force=True):
                                 break
 
                             now2 = int(time.monotonic() * 1000)

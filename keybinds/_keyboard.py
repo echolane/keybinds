@@ -252,6 +252,7 @@ class Bind(BaseBind):
         self._was_full: bool = False
         self._tap_count: int = 0
         self._tap_last_ms: int = 0
+        self._press_suppress_vk: Optional[int] = None
 
         # for ON_CHORD_RELEASED semantics
         self._had_full: bool = False
@@ -270,9 +271,9 @@ class Bind(BaseBind):
         self._armed = False
         self._was_full = False
         self._had_full = False
-        self._release_armed: bool = False
+        self._release_armed = False
+        self._press_suppress_vk = None
         self._invalidated = False
-        self._repeat_active = False
         self._strict_order.reset()
 
     def _debounce_ok(self, now_ms: int) -> bool:
@@ -320,7 +321,7 @@ class Bind(BaseBind):
         with self._lock:
             now_ms = int(event.time)
 
-            if self.window is not None and not self._window_ok():
+            if not self._window_ok():
                 return winput.WP_CONTINUE
 
             if self.config.checks.predicates and not self._checks_ok(event, state):
@@ -405,7 +406,6 @@ class Bind(BaseBind):
 
             flags = winput.WP_CONTINUE
 
-            # --- WHILE_ACTIVE / WHILE_EVALUATING (only these differ) ---
             sup = self.config.suppress
             relevant = (vk_evt in chord.allowed_union) or is_modifier_vk(vk_evt)
 
@@ -432,6 +432,17 @@ class Bind(BaseBind):
                                 break
                 if in_progress and relevant:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+
+            # WHEN_MATCHED: suppress paired KEYUP after a successful ON_PRESS fire
+            elif self.config.suppress == SuppressPolicy.WHEN_MATCHED and self._press_suppress_vk is not None:
+                if is_up and vk_evt == self._press_suppress_vk:
+                    flags |= winput.WP_DONT_PASS_INPUT_ON
+                    self._press_suppress_vk = None
+
+            # safety: if chord cycle ended without seeing that keyup (rare), clear it
+            if self._press_suppress_vk is not None and (not any_chord_key_pressed):
+                self._press_suppress_vk = None
+
             # --- end suppress ---
 
             trig = self.config.trigger
@@ -446,6 +457,29 @@ class Bind(BaseBind):
 
             # Sequence
             if self.is_sequence:
+                if is_repeat:
+                    return flags
+
+                if fresh_down and (vk_evt not in chord.allowed_union):
+                    cpol = self.config.constraints.chord_policy
+
+                    foreign_ok = False
+                    if cpol == ChordPolicy.RELAXED:
+                        # allow any extra keys between steps
+                        foreign_ok = True
+
+                    elif cpol == ChordPolicy.IGNORE_EXTRA_MODIFIERS:
+                        # allow only extra modifiers
+                        foreign_ok = is_modifier_vk(vk_evt)
+
+                    else:
+                        # STRICT: allow only explicitly ignored keys (if any)
+                        foreign_ok = (vk_evt in self.config.constraints.ignore_keys)
+
+                    if not foreign_ok:
+                        self.reset()
+                        return flags
+
                 if full and fresh_down:
                     self._seq_last_ms = now_ms
                     if self._seq_index == len(self.steps) - 1:
@@ -469,22 +503,26 @@ class Bind(BaseBind):
             # -------------------------
 
             if trig == Trigger.ON_PRESS and full and fresh_down and (vk_evt in chord.allowed_union):
-                # Fires on fresh keydown while chord is full
                 if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    self._press_suppress_vk = vk_evt  # keyup suppress
 
             elif trig == Trigger.ON_CHORD_COMPLETE and full and fresh_down and not prev_full and (vk_evt in chord.allowed_union):
                 # Fires only on transition NOT_FULL -> FULL
                 if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    self._press_suppress_vk = vk_evt
 
             elif trig == Trigger.ON_RELEASE:
                 # Fires after a completion (full) happened; rearmed each time the chord becomes full again.
-                # Example: hold Ctrl, tap E -> callback on each E release.
-                if self._had_full and self._release_armed and is_up and (vk_evt in chord.allowed_union):
-                    if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                # Example: hold Ctrl, tap R -> callback on each R release.
+                if self._had_full and self._release_armed and (vk_evt in chord.allowed_union):
+                    if self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                         flags |= winput.WP_DONT_PASS_INPUT_ON
-                    self._release_armed = False
+
+                    if is_up:
+                        fire_if_allowed(now_ms)
+                        self._release_armed = False
 
             elif trig == Trigger.ON_CHORD_RELEASED:
                 # Fires when ALL chord keys are released AFTER chord was fully pressed.
@@ -497,7 +535,9 @@ class Bind(BaseBind):
                     self._strict_order.reset()
 
             elif trig == Trigger.ON_CLICK:
-                if full and fresh_down:
+                if is_repeat:
+                    pass
+                elif full and fresh_down:
                     self._click_down_ms = now_ms
                 elif is_up and self._click_down_ms is not None:
                     dur = now_ms - self._click_down_ms
@@ -507,7 +547,7 @@ class Bind(BaseBind):
                             flags |= winput.WP_DONT_PASS_INPUT_ON
 
             elif trig == Trigger.ON_HOLD:
-                if full and fresh_down:
+                if full and fresh_down and not is_repeat:
                     hold_ms = self.config.timing.hold_ms
                     chord0 = chord
                     pressed0 = pressed
@@ -527,19 +567,20 @@ class Bind(BaseBind):
                     threading.Thread(target=_hold, daemon=True).start()
 
             elif trig == Trigger.ON_REPEAT:
-                if full and is_down and not self._repeat_active:
-                    self._repeat_active = True
+                if full and fresh_down and not is_repeat:
                     delay_s = max(self.config.timing.hold_ms, self.config.timing.repeat_delay_ms) / 1000.0
                     interval_s = max(1, self.config.timing.repeat_interval_ms) / 1000.0
                     chord0 = chord
                     pressed0 = pressed
 
+                    self._hold_token += 1
+                    token = self._hold_token
+
                     def _repeat() -> None:
                         time.sleep(max(0.0, delay_s))
                         while True:
                             with self._lock:
-                                if not self._match_chord(chord0, pressed0) or not self._window_ok(force=True):
-                                    self._repeat_active = False
+                                if token != self._hold_token or not self._match_chord(chord0, pressed0) or not self._window_ok(force=True):
                                     break
                                 now2 = int(time.monotonic() * 1000)
                                 fire_if_allowed(now2)
@@ -547,7 +588,7 @@ class Bind(BaseBind):
 
                     threading.Thread(target=_repeat, daemon=True).start()
 
-            elif trig == Trigger.ON_DOUBLE_TAP and full and fresh_down:
+            elif trig == Trigger.ON_DOUBLE_TAP and full and fresh_down and not is_repeat:
                 win = self.config.timing.double_tap_window_ms
                 if (now_ms - self._tap_last_ms) <= win:
                     self._tap_count += 1

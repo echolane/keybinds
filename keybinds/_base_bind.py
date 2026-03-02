@@ -24,7 +24,6 @@ class BaseBind:
         self.window = get_window(hwnd)
         self._dispatch = dispatch or (lambda fn: fn())
 
-        self._repeat_active: bool = False
         self._hold_token: int = 0
 
         self._focus_cache: bool = True
@@ -41,7 +40,6 @@ class BaseBind:
         if pol == FocusPolicy.CANCEL_ON_BLUR:
             self.reset()
         elif pol == FocusPolicy.PAUSE_ON_BLUR:
-            self._repeat_active = False
             self._hold_token += 1
 
     def _on_focus(self) -> None:

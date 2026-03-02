@@ -8,7 +8,7 @@ from ._backend import _GlobalBackend
 from ._dispatcher import _CallbackDispatcher
 from ._keyboard import Bind
 from ._mouse import MouseBind
-from .types import BindConfig, MouseBindConfig, MouseButton
+from .types import BindConfig, MouseBindConfig, MouseButton, Callback
 
 if TYPE_CHECKING:
     import asyncio
@@ -96,7 +96,7 @@ class Hook:
     def started(self) -> bool:
         return self._started
 
-    def bind(self, expr: str, callback: Callable[[], None], *, config: Optional[BindConfig] = None, hwnd=None) -> Bind:
+    def bind(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, hwnd=None) -> Bind:
         cfg = config or self.default_config or BindConfig()
         b = Bind(expr, callback, config=cfg, hwnd=hwnd, dispatch=self._dispatcher.submit)
         with self._lock:
@@ -104,7 +104,7 @@ class Hook:
             self._keyboard_snapshot = tuple(self._keyboard_binds)
         return b
 
-    def bind_mouse(self, button: Union[MouseButton, str], callback: Callable[[], None], *, config: Optional[MouseBindConfig] = None, hwnd=None) -> MouseBind:
+    def bind_mouse(self, button: Union[MouseButton, str], callback: Callback, *, config: Optional[MouseBindConfig] = None, hwnd=None) -> MouseBind:
         cfg = config or self.default_mouse_config or MouseBindConfig()
         b = MouseBind(button, callback, config=cfg, hwnd=hwnd, dispatch=self._dispatcher.submit)
         with self._lock:

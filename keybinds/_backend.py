@@ -141,26 +141,20 @@ class _GlobalBackend:
         injected = bool(getattr(event, "injected", False))
 
         # Choose domain for repeat detection on KEYDOWN only
-        if is_down:
-            base = self._pressed_keys_injected if injected else self._pressed_keys
-            was_down = vk in base
-        else:
-            was_down = False
+        base = self._pressed_keys_injected if injected else self._pressed_keys
+        was_down = (vk in base) if is_down else False
 
         if is_down:
             self._pressed_keys_all.add(vk)
+            base.add(vk)
         elif is_up:
-            self._pressed_keys_all.discard(vk)
-
-        if is_down:
-            if injected:
-                self._pressed_keys_injected.add(vk)
+            base.discard(vk)
+            # Only clear from the union set when the key is no longer pressed in either domain.
+            # (If it's pressed in both, a KEYUP from one side must not clear it.)
+            if (vk in self._pressed_keys) or (vk in self._pressed_keys_injected):
+                self._pressed_keys_all.add(vk)
             else:
-                self._pressed_keys.add(vk)
-
-        elif is_up:
-            self._pressed_keys.discard(vk)
-            self._pressed_keys_injected.discard(vk)
+                self._pressed_keys_all.discard(vk)
 
         # Mark OS auto-repeat (keydown while already pressed in that domain)
         try:
@@ -198,41 +192,40 @@ class _GlobalBackend:
 
         injected = bool(getattr(event, "injected", False))
 
-        def _apply(target: set[MouseButton]) -> None:
-            if act == WM_LBUTTONDOWN:
-                target.add(MouseButton.LEFT)
-            elif act == WM_LBUTTONUP:
-                target.discard(MouseButton.LEFT)
-            elif act == WM_RBUTTONDOWN:
-                target.add(MouseButton.RIGHT)
-            elif act == WM_RBUTTONUP:
-                target.discard(MouseButton.RIGHT)
-            elif act == WM_MBUTTONDOWN:
-                target.add(MouseButton.MIDDLE)
-            elif act == WM_MBUTTONUP:
-                target.discard(MouseButton.MIDDLE)
-            elif act == WM_XBUTTONDOWN:
+        def _button_from_event() -> MouseButton | None:
+            if act in (WM_LBUTTONDOWN, WM_LBUTTONUP):
+                return MouseButton.LEFT
+            if act in (WM_RBUTTONDOWN, WM_RBUTTONUP):
+                return MouseButton.RIGHT
+            if act in (WM_MBUTTONDOWN, WM_MBUTTONUP):
+                return MouseButton.MIDDLE
+            if act in (WM_XBUTTONDOWN, WM_XBUTTONUP):
                 which = int(getattr(event, "additional_data", 0) or 0)
                 if which == 1:
-                    target.add(MouseButton.X1)
-                elif which == 2:
-                    target.add(MouseButton.X2)
-            elif act == WM_XBUTTONUP:
-                which = int(getattr(event, "additional_data", 0) or 0)
-                if which == 1:
-                    target.discard(MouseButton.X1)
-                elif which == 2:
-                    target.discard(MouseButton.X2)
+                    return MouseButton.X1
+                if which == 2:
+                    return MouseButton.X2
+            return None
 
-        # Update ALL-state always
-        _apply(self._pressed_mouse_all)
+        btn = _button_from_event()
+        if btn is None:
+            return winput.WP_CONTINUE
 
-        # Update injected-only state only for injected events
-        if injected:
-            _apply(self._pressed_mouse_injected)
-        else:
-            # Update PHYSICAL-state only for non-injected events
-            _apply(self._pressed_mouse)
+        is_down = act in (WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN)
+        is_up = act in (WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP, WM_XBUTTONUP)
+
+        base = self._pressed_mouse_injected if injected else self._pressed_mouse
+
+        if is_down:
+            self._pressed_mouse_all.add(btn)
+            base.add(btn)
+        elif is_up:
+            base.discard(btn)
+            # Only clear from union when it's no longer pressed in either domain.
+            if (btn in self._pressed_mouse) or (btn in self._pressed_mouse_injected):
+                self._pressed_mouse_all.add(btn)
+            else:
+                self._pressed_mouse_all.discard(btn)
 
         state = InputState(
             self._pressed_keys,
@@ -250,3 +243,4 @@ class _GlobalBackend:
             except Exception:
                 pass
         return flags
+

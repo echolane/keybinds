@@ -28,7 +28,7 @@ from . import presets
 
 from ._constants import register_key_token
 
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy",

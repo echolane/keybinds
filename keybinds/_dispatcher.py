@@ -5,6 +5,8 @@ import threading
 from traceback import print_exc
 from typing import Callable, List, Optional, TYPE_CHECKING
 
+from .types import Callback
+
 if TYPE_CHECKING:
     import asyncio
 
@@ -25,7 +27,7 @@ class _CallbackDispatcher:
             asyncio_loop: "Optional[asyncio.AbstractEventLoop]" = None,
             on_async_error: Optional[Callable[[BaseException], None]] = None
     ) -> None:
-        self._q: "queue.SimpleQueue[Optional[Callable[[], None]]]" = queue.SimpleQueue()
+        self._q: "queue.SimpleQueue[Optional[Callback]]" = queue.SimpleQueue()
         self._threads: List[threading.Thread] = []
         self._workers = max(1, int(workers))
         for i in range(self._workers):
@@ -64,13 +66,17 @@ class _CallbackDispatcher:
 
             self._threads.clear()
 
+            if self._async is not None:
+                self._async.stop()
+                self._async = None
+
     def _submit_awaitable(self, aw) -> None:
         if self._async is None:
             from ._async import _AsyncLoopThread
             self._async = _AsyncLoopThread(self._async_loop, on_async_error=self._on_async_error)
         self._async.submit(aw)
 
-    def submit(self, fn: Callable[[], None]) -> None:
+    def submit(self, fn: Callback) -> None:
         self._q.put(fn)
 
     def _worker(self) -> None:
