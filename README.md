@@ -3,7 +3,7 @@
 
 Flexible and high-performance global keyboard & mouse hotkeys for Windows.
 
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/python-3.7%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-active-success)
@@ -32,7 +32,7 @@ pip install keybinds
 ### Requirements
 
 * Windows
-* Python 3.9+
+* Python 3.7+
 
 ---
 

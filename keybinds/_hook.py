@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import Callable, Optional, Union, Generator, TYPE_CHECKING
+from typing import Callable, Optional, Union, Generator, List, Tuple, TYPE_CHECKING
 
 from ._backend import _GlobalBackend
 from ._dispatcher import _CallbackDispatcher
@@ -67,12 +67,12 @@ class Hook:
         self._dispatcher = _CallbackDispatcher(workers=callback_workers, asyncio_loop=asyncio_loop, on_async_error=on_async_error)
 
         # binds live in this frontend
-        self._keyboard_binds: list[Bind] = []
-        self._mouse_binds: list[MouseBind] = []
+        self._keyboard_binds: List[Bind] = []
+        self._mouse_binds: List[MouseBind] = []
 
         # snapshots used by backend hot path
-        self._keyboard_snapshot: tuple[Bind, ...] = ()
-        self._mouse_snapshot: tuple[MouseBind, ...] = ()
+        self._keyboard_snapshot: Tuple[Bind, ...] = ()
+        self._mouse_snapshot: Tuple[MouseBind, ...] = ()
 
         if auto_start:
             self.start()

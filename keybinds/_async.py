@@ -35,7 +35,7 @@ class _AsyncLoopThread:
         self._on_async_error = on_async_error or _default_on_async_error
 
     @property
-    def loop(self) -> Optional[object]:
+    def loop(self) -> "Optional[asyncio.AbstractEventLoop]":
         return self._loop
 
     def _run(self) -> None:

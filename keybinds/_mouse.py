@@ -42,7 +42,7 @@ def _normalize_mouse_button(btn: object) -> MouseButton:
     raise ValueError(f"Unknown mouse button: {btn!r}")
 
 
-class MouseBind(BaseBind):
+class MouseBind(BaseBind[winput.MouseEvent]):
     def __init__(
         self,
         button: Union[MouseButton, str],

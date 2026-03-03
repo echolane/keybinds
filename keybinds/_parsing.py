@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Set, Tuple
+from typing import List, Set, Tuple, FrozenSet
 
 from ._constants import _MOD_GROUPS, SPECIAL_KEYS
 
@@ -30,8 +30,8 @@ def _token_to_vk_group(token: str) -> Set[int]:
 
 @dataclass(frozen=True)
 class _ChordSpec:
-    groups: Tuple[frozenset[int], ...]  # each element: acceptable vk codes
-    allowed_union: frozenset[int]  # union(groups)
+    groups: Tuple[FrozenSet[int], ...]  # each element: acceptable vk codes
+    allowed_union: FrozenSet[int]  # union(groups)
 
 
 def parse_chord(expr: str) -> _ChordSpec:
@@ -39,7 +39,7 @@ def parse_chord(expr: str) -> _ChordSpec:
     if not parts:
         raise ValueError("empty chord")
 
-    groups: List[frozenset[int]] = []
+    groups: List[FrozenSet[int]] = []
     union: Set[int] = set()
     for p in parts:
         g = frozenset(_token_to_vk_group(p))

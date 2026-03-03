@@ -6,8 +6,6 @@ Run:
 Manual test: press keys and click mouse, watch console output.
 """
 
-import time
-
 from keybinds import Hook, SuppressPolicy, BindConfig
 from keybinds.presets import (
     press, release, chord_released, click, hold, repeat, double_tap, sequence,

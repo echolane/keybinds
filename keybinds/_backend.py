@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import weakref
 from traceback import print_exc
-from typing import Optional, List
+from typing import Optional, List, Set
 
 from . import winput
 
@@ -38,16 +38,16 @@ class _GlobalBackend:
         self._thread_started = False
 
         # physical only
-        self._pressed_keys: set[int] = set()
-        self._pressed_mouse: set[MouseButton] = set()
+        self._pressed_keys: Set[int] = set()
+        self._pressed_mouse: Set[MouseButton] = set()
 
         # physical + injected
-        self._pressed_keys_all: set[int] = set()
-        self._pressed_mouse_all: set[MouseButton] = set()
+        self._pressed_keys_all: Set[int] = set()
+        self._pressed_mouse_all: Set[MouseButton] = set()
 
         # injected only
-        self._pressed_keys_injected: set[int] = set()
-        self._pressed_mouse_injected: set[MouseButton] = set()
+        self._pressed_keys_injected: Set[int] = set()
+        self._pressed_mouse_injected: Set[MouseButton] = set()
 
     @classmethod
     def instance(cls) -> _GlobalBackend:
@@ -192,7 +192,7 @@ class _GlobalBackend:
 
         injected = bool(getattr(event, "injected", False))
 
-        def _button_from_event() -> MouseButton | None:
+        def _button_from_event() -> Optional[MouseButton]:
             if act in (WM_LBUTTONDOWN, WM_LBUTTONUP):
                 return MouseButton.LEFT
             if act in (WM_RBUTTONDOWN, WM_RBUTTONUP):

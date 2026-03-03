@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Optional, Union, Sequence, Set, Any
+from typing import Callable, Optional, Union, Sequence, Set, Any, TypeVar, Awaitable
 
-Callback = Callable[[], None]
+SyncCallback = Callable[[], None]
+AsyncCallback = Callable[[], Awaitable[None]]
+Callback = Union[SyncCallback, AsyncCallback]
+
 Predicate = Callable[[Any, Any], bool]
 
 
@@ -112,6 +115,33 @@ class BindConfig:
         object.__setattr__(self, "checks", Checks.coerce(self.checks))
 
 
+    # ---- API: merges -------------------------------------------------
+
+    def soft_merge(self, patch: BindConfig) -> BindConfig:
+        """Apply only non-default fields from `patch` (patch semantics)."""
+        if not isinstance(patch, BindConfig):
+            raise TypeError(f"Expected BindConfig, got {type(patch)!r}")
+        return _merge_soft(self, patch)
+
+    def hard_merge(self, other: BindConfig) -> BindConfig:
+        """Overwrite all fields from `other` (full override semantics)."""
+        if not isinstance(other, BindConfig):
+            raise TypeError(f"Expected BindConfig, got {type(other)!r}")
+        return _merge_dc_hard(self, other)
+
+    # ---- Operator sugar ---------------------------------------------
+
+    def __add__(self, other: BindConfig) -> BindConfig:
+        if not isinstance(other, BindConfig):
+            return NotImplemented
+        return self.soft_merge(other)
+
+    def __or__(self, other: BindConfig) -> BindConfig:
+        if not isinstance(other, BindConfig):
+            return NotImplemented
+        return self.hard_merge(other)
+
+
 class MouseButton(Enum):
     LEFT = auto()
     RIGHT = auto()
@@ -122,7 +152,7 @@ class MouseButton(Enum):
 
 @dataclass(frozen=True)
 class MouseBindConfig:
-    trigger: Trigger = Trigger.ON_CLICK
+    trigger: Trigger = Trigger.ON_PRESS
 
     suppress: SuppressPolicy = SuppressPolicy.NEVER
     injected: InjectedPolicy = InjectedPolicy.ALLOW
@@ -134,6 +164,31 @@ class MouseBindConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "checks", Checks.coerce(self.checks))
+
+
+    def soft_merge(self, patch: MouseBindConfig) -> MouseBindConfig:
+        """Apply only non-default fields from `patch` (patch semantics)."""
+        if not isinstance(patch, MouseBindConfig):
+            raise TypeError(f"Expected MouseBindConfig, got {type(patch)!r}")
+        return _merge_soft(self, patch)
+
+    def hard_merge(self, other: MouseBindConfig) -> MouseBindConfig:
+        """Overwrite all fields from `other` (full override semantics)."""
+        if not isinstance(other, MouseBindConfig):
+            raise TypeError(f"Expected MouseBindConfig, got {type(other)!r}")
+        return _merge_dc_hard(self, other)
+
+    # ---- Operator sugar ---------------------------------------------
+
+    def __add__(self, other: MouseBindConfig) -> MouseBindConfig:
+        if not isinstance(other, MouseBindConfig):
+            return NotImplemented
+        return self.soft_merge(other)
+
+    def __or__(self, other: MouseBindConfig) -> MouseBindConfig:
+        if not isinstance(other, MouseBindConfig):
+            return NotImplemented
+        return self.hard_merge(other)
 
 
 # =========================================================
@@ -151,6 +206,30 @@ _DEFAULT_CHECKS = Checks()
 # Dataclass merge helpers
 # =========================================================
 
+TBind = TypeVar("TBind", BindConfig, MouseBindConfig)
+
+
+def _merge_dc_hard(lhs, rhs):
+    """
+    Recursively merge dataclasses in "hard" mode.
+
+    All fields from rhs overwrite lhs, including default values.
+    This behaves like a full override.
+    """
+    out = lhs
+
+    for name in lhs.__dataclass_fields__.keys():  # type: ignore[attr-defined]
+        lval = getattr(lhs, name)
+        rval = getattr(rhs, name)
+
+        if is_dataclass(lval) and is_dataclass(rval):
+            out = replace(out, **{name: _merge_dc_hard(lval, rval)})
+        else:
+            out = replace(out, **{name: rval})
+
+    return out
+
+
 def _merge_dc_soft(lhs, rhs, default_obj):
     """
     Recursively merge dataclasses in "soft" mode.
@@ -160,7 +239,7 @@ def _merge_dc_soft(lhs, rhs, default_obj):
     """
     out = lhs
 
-    for name in default_obj.__dataclass_fields__.keys():
+    for name in default_obj.__dataclass_fields__.keys():  # type: ignore[attr-defined]
         lval = getattr(lhs, name)
         rval = getattr(rhs, name)
         dval = getattr(default_obj, name)
@@ -177,48 +256,21 @@ def _merge_dc_soft(lhs, rhs, default_obj):
     return out
 
 
-def _merge_dc_hard(lhs, rhs):
-    """
-    Recursively merge dataclasses in "hard" mode.
-
-    All fields from rhs overwrite lhs, including default values.
-    This behaves like a full override.
-    """
+def _merge_soft(lhs: TBind, rhs: TBind) -> TBind:
     out = lhs
 
-    for name in lhs.__dataclass_fields__.keys():
-        lval = getattr(lhs, name)
-        rval = getattr(rhs, name)
+    default_bind = _DEFAULT_BIND if isinstance(out, BindConfig) else _DEFAULT_MOUSE
 
-        if is_dataclass(lval) and is_dataclass(rval):
-            out = replace(out, **{name: _merge_dc_hard(lval, rval)})
-        else:
-            out = replace(out, **{name: rval})
-
-    return out
-
-
-# =========================================================
-# BindConfig merge logic
-# =========================================================
-
-def merge_bind_soft(lhs: BindConfig, rhs: BindConfig) -> BindConfig:
-    """
-    Soft merge for BindConfig.
-    Only non-default fields from rhs are applied.
-    """
-    out = lhs
-
-    if rhs.trigger != _DEFAULT_BIND.trigger:
+    if rhs.trigger != default_bind.trigger:
         out = replace(out, trigger=rhs.trigger)
 
-    if rhs.suppress != _DEFAULT_BIND.suppress:
+    if rhs.suppress != default_bind.suppress:
         out = replace(out, suppress=rhs.suppress)
 
-    if rhs.injected != _DEFAULT_BIND.injected:
+    if rhs.injected != default_bind.injected:
         out = replace(out, injected=rhs.injected)
 
-    if rhs.focus != _DEFAULT_BIND.focus:
+    if rhs.focus != default_bind.focus:
         out = replace(out, focus=rhs.focus)
 
     out = replace(out, timing=_merge_dc_soft(out.timing, rhs.timing, _DEFAULT_TIMING))
@@ -226,86 +278,3 @@ def merge_bind_soft(lhs: BindConfig, rhs: BindConfig) -> BindConfig:
     out = replace(out, checks=_merge_dc_soft(out.checks, rhs.checks, _DEFAULT_CHECKS))
 
     return out
-
-
-def merge_bind_hard(lhs: BindConfig, rhs: BindConfig) -> BindConfig:
-    """
-    Hard merge for BindConfig.
-    All fields from rhs overwrite lhs.
-    """
-    return _merge_dc_hard(lhs, rhs)
-
-
-# =========================================================
-# MouseBindConfig merge logic
-# =========================================================
-
-def merge_mouse_soft(lhs: MouseBindConfig, rhs: MouseBindConfig) -> MouseBindConfig:
-    """
-    Soft merge for MouseBindConfig.
-    Only non-default fields from rhs are applied.
-    """
-    out = lhs
-
-    if rhs.trigger != _DEFAULT_MOUSE.trigger:
-        out = replace(out, trigger=rhs.trigger)
-
-    if rhs.suppress != _DEFAULT_MOUSE.suppress:
-        out = replace(out, suppress=rhs.suppress)
-
-    if rhs.injected != _DEFAULT_MOUSE.injected:
-        out = replace(out, injected=rhs.injected)
-
-    if rhs.focus != _DEFAULT_MOUSE.focus:
-        out = replace(out, focus=rhs.focus)
-
-    out = replace(out, timing=_merge_dc_soft(out.timing, rhs.timing, _DEFAULT_TIMING))
-    out = replace(out, constraints=_merge_dc_soft(out.constraints, rhs.constraints, _DEFAULT_CONSTRAINTS))
-    out = replace(out, checks=_merge_dc_soft(out.checks, rhs.checks, _DEFAULT_CHECKS))
-
-    return out
-
-
-def merge_mouse_hard(lhs: MouseBindConfig, rhs: MouseBindConfig) -> MouseBindConfig:
-    """
-    Hard merge for MouseBindConfig.
-    All fields from rhs overwrite lhs.
-    """
-    return _merge_dc_hard(lhs, rhs)
-
-
-# =========================================================
-# Operator sugar
-#
-# +  -> soft merge (patch semantics)
-# |  -> hard merge (full override semantics)
-# =========================================================
-
-def _bind_add(self: BindConfig, other: BindConfig) -> BindConfig:
-    if not isinstance(other, BindConfig):
-        return NotImplemented
-    return merge_bind_soft(self, other)
-
-
-def _bind_or(self: BindConfig, other: BindConfig) -> BindConfig:
-    if not isinstance(other, BindConfig):
-        return NotImplemented
-    return merge_bind_hard(self, other)
-
-
-def _mouse_add(self: MouseBindConfig, other: MouseBindConfig) -> MouseBindConfig:
-    if not isinstance(other, MouseBindConfig):
-        return NotImplemented
-    return merge_mouse_soft(self, other)
-
-
-def _mouse_or(self: MouseBindConfig, other: MouseBindConfig) -> MouseBindConfig:
-    if not isinstance(other, MouseBindConfig):
-        return NotImplemented
-    return merge_mouse_hard(self, other)
-
-
-BindConfig.__add__ = _bind_add          # type: ignore[attr-defined]
-BindConfig.__or__ = _bind_or           # type: ignore[attr-defined]
-MouseBindConfig.__add__ = _mouse_add   # type: ignore[attr-defined]
-MouseBindConfig.__or__ = _mouse_or     # type: ignore[attr-defined]

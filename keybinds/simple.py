@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional, Dict
 
 from keybinds import get_default_hook as get_hook, join
 from keybinds.bind import Hook
@@ -17,15 +17,15 @@ from keybinds.types import (
 def _build_config(
     *,
     release: bool = False,
-    hold: int | None = None,
-    repeat: int | None = None,
+    hold: Optional[int] = None,
+    repeat: Optional[int] = None,
     sequence: bool = False,
     double_tap: bool = False,
     suppress: bool = False,
     # optional timings:
-    delay: int | None = None,    # repeat initial delay (ms)
-    timeout: int | None = None,  # sequence timeout / chord timeout (ms)
-    double_tap_window: int | None = None,
+    delay: Optional[int] = None,    # repeat initial delay (ms)
+    timeout: Optional[int] = None,  # sequence timeout / chord timeout (ms)
+    double_tap_window: Optional[int] = None,
 ) -> BindConfig:
     """
     Convert simple flags into BindConfig.
@@ -48,7 +48,7 @@ def _build_config(
         )
 
     trigger = Trigger.ON_PRESS
-    timing_kwargs: dict[str, int] = {}
+    timing_kwargs: Dict[str, int] = {}
 
     if hold is not None:
         trigger = Trigger.ON_HOLD
@@ -89,17 +89,17 @@ def hotkey(
     expr: str,
     *,
     release: bool = False,
-    hold: int | None = None,
-    repeat: int | None = None,
+    hold: Optional[int] = None,
+    repeat: Optional[int] = None,
     sequence: bool = False,
     double_tap: bool = False,
     suppress: bool = False,
     # optional ergonomics:
-    delay: int | None = None,
-    timeout: int | None = None,
-    double_tap_window: int | None = None,
-    hwnd: int | None = None,
-    hook: Hook | None = None,
+    delay: Optional[int] = None,
+    timeout: Optional[int] = None,
+    double_tap_window: Optional[int] = None,
+    hwnd: Optional[int] = None,
+    hook: Optional[Hook] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Simple decorator API for common keyboard hotkeys.
@@ -130,16 +130,16 @@ def hotkey(
     return bind_key(expr, config=cfg, hwnd=hwnd, hook=target_hook)
 
 
-def wait(timeout: float | None = None, *, hook: Hook | None = None) -> bool:
+def wait(timeout: Optional[float] = None, *, hook: Optional[Hook] = None) -> bool:
     """Proxy to Hook.wait(timeout)."""
     return (hook or get_hook()).wait(timeout=timeout)
 
 
-def close(*, hook: Hook | None = None) -> None:
+def close(*, hook: Optional[Hook] = None) -> None:
     """Close the simple-layer hook frontend/workers."""
     (hook or get_hook()).close()
 
 
-def run(*, hook: Hook | None = None) -> None:
+def run(*, hook: Optional[Hook] = None) -> None:
     """Alias for join()."""
     join(hook=hook)

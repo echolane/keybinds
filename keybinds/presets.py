@@ -71,7 +71,7 @@ def suppress(mouse: bool = False) -> Union[BindConfig, MouseBindConfig]:
     return cfg_class(suppress=SuppressPolicy.WHILE_ACTIVE)
 
 
-def ignore_injected(mouse: bool = False) -> BindConfig:
+def ignore_injected(mouse: bool = False) -> Union[BindConfig, MouseBindConfig]:
     """Convenience: ignore injected (synthetic) events."""
     cfg_class = MouseBindConfig if mouse else BindConfig
     return cfg_class(injected=InjectedPolicy.IGNORE)

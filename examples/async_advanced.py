@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from keybinds import Hook
 from keybinds.decorators import bind_key

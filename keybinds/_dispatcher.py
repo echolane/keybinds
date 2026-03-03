@@ -9,6 +9,7 @@ from .types import Callback
 
 if TYPE_CHECKING:
     import asyncio
+    from ._async import _AsyncLoopThread
 
 
 def _is_awaitable(obj) -> bool:
@@ -37,7 +38,7 @@ class _CallbackDispatcher:
 
         self._async_loop: "Optional[asyncio.AbstractEventLoop]" = asyncio_loop
         self._on_async_error: Optional[Callable[[BaseException], None]] = on_async_error
-        self._async = None  # lazy
+        self._async: "Optional[_AsyncLoopThread]" = None  # lazy
 
         self._stopped: bool = False
         self.start()

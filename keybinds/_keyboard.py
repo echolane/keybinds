@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, Optional, Set, TYPE_CHECKING
+from typing import Callable, Optional, Set, List, TYPE_CHECKING
 
 from . import winput
 
@@ -69,7 +69,7 @@ class _StrictOrderState:
     def __init__(self) -> None:
         self.invalid: bool = False
         self.attempt_invalid: bool = False
-        self.seen_groups: list[int] = []
+        self.seen_groups: List[int] = []
         self.seen_set: Set[int] = set()
         self.locked_prefix_len: Optional[int] = None
 
@@ -87,15 +87,15 @@ class _StrictOrderState:
                 return i
         return None
 
-    def pressed_group_indices(self, chord: _ChordSpec, pressed: Set[int]) -> list[int]:
-        out: list[int] = []
+    def pressed_group_indices(self, chord: _ChordSpec, pressed: Set[int]) -> List[int]:
+        out: List[int] = []
         for i, g in enumerate(chord.groups):
             if any(vk in pressed for vk in g):
                 out.append(i)
         return out
 
     @staticmethod
-    def _is_prefix_indices(idxs: list[int]) -> bool:
+    def _is_prefix_indices(idxs: List[int]) -> bool:
         return idxs == list(range(len(idxs)))
 
     # ---------- state transitions ----------
@@ -224,7 +224,7 @@ class _StrictOrderState:
             self.locked_prefix_len = max(0, len(chord.groups) - 1)
 
 
-class Bind(BaseBind):
+class Bind(BaseBind[winput.KeyboardEvent]):
     """Policy-driven keyboard bind."""
 
     def __init__(

@@ -1,7 +1,7 @@
 import threading
 import time
 
-from typing import Union, Optional, Callable
+from typing import Union, Optional, Callable, TypeVar, Generic
 
 from . import winput
 
@@ -9,8 +9,10 @@ from ._state import InputState
 from ._window import get_window
 from .types import Callback, FocusPolicy, BindConfig, MouseBindConfig
 
+E = TypeVar("E", winput.KeyboardEvent, winput.MouseEvent)
 
-class BaseBind:
+
+class BaseBind(Generic[E]):
     def __init__(
         self,
         callback: Callback,
@@ -76,7 +78,7 @@ class BaseBind:
         self._focus_cache = focused
         return focused
 
-    def _checks_ok(self, event: Union[winput.KeyboardEvent, winput.MouseEvent], state: InputState) -> bool:
+    def _checks_ok(self, event: E, state: InputState) -> bool:
         for pred in self.config.checks:
             try:
                 if not pred(event, state):

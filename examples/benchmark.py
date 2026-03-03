@@ -1,6 +1,7 @@
 import time
 import ctypes
 from ctypes import wintypes
+from typing import List
 
 # ---------- timer 1ms ----------
 winmm = ctypes.WinDLL("winmm", use_last_error=True)
@@ -89,7 +90,7 @@ def pct(values, p: float) -> float:
     k = int(round((len(s) - 1) * p))
     return s[k]
 
-def summarize_ns(lat_ns: list[int]) -> dict:
+def summarize_ns(lat_ns: List[int]) -> dict:
     return {
         "count": len(lat_ns),
         "p50_ms": pct(lat_ns, 0.50) / 1e6,
