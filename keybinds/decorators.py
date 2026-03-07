@@ -10,7 +10,27 @@ from .types import (
     SuppressPolicy,
     Trigger,
 )
-from .bind import get_default_hook, Hook
+from .bind import get_default_hook, Hook, Bind, MouseBind
+
+
+def _add_binds_to_func(binds: List[Union[Bind, MouseBind]], func: Callback) -> None:
+    new_bind = binds[0] if len(binds) == 1 else binds
+
+    if not hasattr(func, "bind"):
+        setattr(func, "bind", new_bind)
+        return
+
+    existing = getattr(func, "bind")
+
+    if not isinstance(existing, list):
+        existing = [existing]
+
+    if isinstance(new_bind, list):
+        existing.extend(new_bind)
+    else:
+        existing.append(new_bind)
+
+    setattr(func, "bind", existing)
 
 
 def bind_key(
@@ -38,7 +58,8 @@ def bind_key(
         for key in keys:
             b = hook.bind(key, func, config=config, hwnd=hwnd)
             binds.append(b)
-        setattr(func, "bind", binds[0] if len(binds) == 1 else binds)
+
+        _add_binds_to_func(binds, func)
         return func
     return decorator
 
@@ -63,6 +84,7 @@ def bind_mouse(
         for btn in btns:
             b = hook.bind_mouse(btn, func, config=cfg, hwnd=hwnd)
             binds.append(b)
-        setattr(func, "bind", binds[0] if len(binds) == 1 else binds)
+
+        _add_binds_to_func(binds, func)
         return func
     return decorator

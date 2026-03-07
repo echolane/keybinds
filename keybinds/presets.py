@@ -12,7 +12,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional, Union
+from typing import Optional
 
 from .types import (
     BindConfig,
@@ -65,16 +65,24 @@ def strict_constraints() -> Constraints:
     return Constraints(chord_policy=ChordPolicy.STRICT)
 
 
-def suppress(mouse: bool = False) -> Union[BindConfig, MouseBindConfig]:
+def suppress() -> BindConfig:
     """Convenience: suppress (WHILE_ACTIVE) on match."""
-    cfg_class = MouseBindConfig if mouse else BindConfig
-    return cfg_class(suppress=SuppressPolicy.WHILE_ACTIVE)
+    return BindConfig(suppress=SuppressPolicy.WHILE_ACTIVE)
 
 
-def ignore_injected(mouse: bool = False) -> Union[BindConfig, MouseBindConfig]:
+def suppress_mouse() -> MouseBindConfig:
+    """Convenience: suppress (WHILE_ACTIVE) on match."""
+    return MouseBindConfig(suppress=SuppressPolicy.WHILE_ACTIVE)
+
+
+def ignore_injected() -> BindConfig:
     """Convenience: ignore injected (synthetic) events."""
-    cfg_class = MouseBindConfig if mouse else BindConfig
-    return cfg_class(injected=InjectedPolicy.IGNORE)
+    return BindConfig(injected=InjectedPolicy.IGNORE)
+
+
+def ignore_injected_mouse() -> MouseBindConfig:
+    """Convenience: ignore injected (synthetic) events."""
+    return MouseBindConfig(injected=InjectedPolicy.IGNORE)
 
 
 # -----------------------------

@@ -316,6 +316,23 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 return False
         return True
 
+    def _get_pressed_for_policy(self, state: InputState, *, inj: bool) -> Set[int]:
+        pol = self.config.injected
+
+        if pol == InjectedPolicy.IGNORE:
+            return set(state.pressed_keys)  # physical-only
+
+        if pol == InjectedPolicy.ONLY:
+            return set(state.pressed_keys_injected or ())
+
+        # InjectedPolicy.ALLOW
+        if inj:
+            inj_keys = set(state.pressed_keys_injected or ())
+            phys_mods = {vk for vk in state.pressed_keys if is_modifier_vk(vk)}
+            return inj_keys | phys_mods
+
+        return set(state.pressed_keys)
+
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
         with self._lock:
@@ -343,20 +360,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 return winput.WP_CONTINUE
 
             chord = self.steps[self._seq_index]
-
-            # Choose matching domain based on injected policy.
-            if pol == InjectedPolicy.IGNORE:
-                pressed = state.pressed_keys  # physical-only
-            elif pol == InjectedPolicy.ONLY:
-                pressed = state.pressed_keys_injected or set()  # injected-only
-            else:
-                # ALLOW: match in the event's domain (do not use pressed_keys_all).
-                if inj:
-                    inj_keys = state.pressed_keys_injected or set()
-                    phys_mods = {vk for vk in state.pressed_keys if is_modifier_vk(vk)}
-                    pressed = inj_keys | phys_mods
-                else:
-                    pressed = state.pressed_keys
+            pressed = self._get_pressed_for_policy(state, inj=inj)
 
             vk_evt = int(event.vkCode)
             is_down = event.action in (WM_KEYDOWN, WM_SYSKEYDOWN)
@@ -549,8 +553,6 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             elif trig == Trigger.ON_HOLD:
                 if full and fresh_down and not is_repeat:
                     hold_ms = self.config.timing.hold_ms
-                    chord0 = chord
-                    pressed0 = pressed
 
                     self._hold_token += 1
                     token = self._hold_token
@@ -560,7 +562,9 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                         with self._lock:
                             if token != self._hold_token or not self._window_ok(force=True):
                                 return
-                            if self._match_chord(chord0, pressed0):
+
+                            pressed = self._get_pressed_for_policy(state, inj=inj)
+                            if self._match_chord(chord, pressed):
                                 now2 = int(time.monotonic() * 1000)
                                 fire_if_allowed(now2)
 
@@ -570,8 +574,6 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 if full and fresh_down and not is_repeat:
                     delay_s = max(self.config.timing.hold_ms, self.config.timing.repeat_delay_ms) / 1000.0
                     interval_s = max(1, self.config.timing.repeat_interval_ms) / 1000.0
-                    chord0 = chord
-                    pressed0 = pressed
 
                     self._hold_token += 1
                     token = self._hold_token
@@ -580,7 +582,11 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                         time.sleep(max(0.0, delay_s))
                         while True:
                             with self._lock:
-                                if token != self._hold_token or not self._match_chord(chord0, pressed0) or not self._window_ok(force=True):
+                                if token != self._hold_token or not self._window_ok(force=True):
+                                    break
+
+                                pressed = self._get_pressed_for_policy(state, inj=inj)
+                                if not self._match_chord(chord, pressed):
                                     break
                                 now2 = int(time.monotonic() * 1000)
                                 fire_if_allowed(now2)

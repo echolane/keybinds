@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Set
+from typing import Dict
 
 from . import winput
 
@@ -38,12 +38,23 @@ WM_MOUSEWHEEL = getattr(winput, "WM_MOUSEWHEEL", 0x020A)
 WM_MOUSEHWHEEL = getattr(winput, "WM_MOUSEHWHEEL", 0x020E)
 
 
-_MOD_GROUPS: Dict[str, Set[int]] = {
+_MOD_GROUPS = {
     "shift": {VK_SHIFT, VK_LSHIFT, VK_RSHIFT},
+    "lshift": {VK_LSHIFT},
+    "rshift": {VK_RSHIFT},
+
     "ctrl": {VK_CONTROL, VK_LCONTROL, VK_RCONTROL},
     "control": {VK_CONTROL, VK_LCONTROL, VK_RCONTROL},
+    "lctrl": {VK_LCONTROL},
+    "rctrl": {VK_RCONTROL},
+    "lcontrol": {VK_LCONTROL},
+    "rcontrol": {VK_RCONTROL},
+
     "alt": {VK_MENU, VK_LMENU, VK_RMENU},
     "menu": {VK_MENU, VK_LMENU, VK_RMENU},
+    "lalt": {VK_LMENU},
+    "ralt": {VK_RMENU},
+
     "win": {VK_LWIN, VK_RWIN},
     "lwin": {VK_LWIN},
     "rwin": {VK_RWIN},
@@ -96,6 +107,35 @@ SPECIAL_KEYS.update({
 
 for i in range(1, 25):
     SPECIAL_KEYS[f"f{i}"] = getattr(winput, f"VK_F{i}", 0x70 + (i - 1))
+
+for i in range(10):
+    vk = getattr(winput, f"VK_NUMPAD{i}", 0x60 + i)
+    SPECIAL_KEYS[f"numpad{i}"] = vk
+    SPECIAL_KEYS[f"num{i}"] = vk
+
+SPECIAL_KEYS.update({
+    "numlock": getattr(winput, "VK_NUMLOCK", 0x90),
+
+    "num*": getattr(winput, "VK_MULTIPLY", 0x6A),
+    "nummul": getattr(winput, "VK_MULTIPLY", 0x6A),
+    "numpadmultiply": getattr(winput, "VK_MULTIPLY", 0x6A),
+
+    "num+": getattr(winput, "VK_ADD", 0x6B),
+    "numadd": getattr(winput, "VK_ADD", 0x6B),
+    "numpadadd": getattr(winput, "VK_ADD", 0x6B),
+
+    "num-": getattr(winput, "VK_SUBTRACT", 0x6D),
+    "numsub": getattr(winput, "VK_SUBTRACT", 0x6D),
+    "numpadsubtract": getattr(winput, "VK_SUBTRACT", 0x6D),
+
+    "num.": getattr(winput, "VK_DECIMAL", 0x6E),
+    "numdecimal": getattr(winput, "VK_DECIMAL", 0x6E),
+    "numpaddecimal": getattr(winput, "VK_DECIMAL", 0x6E),
+
+    "num/": getattr(winput, "VK_DIVIDE", 0x6F),
+    "numdiv": getattr(winput, "VK_DIVIDE", 0x6F),
+    "numpaddivide": getattr(winput, "VK_DIVIDE", 0x6F),
+})
 
 
 def is_modifier_vk(vk: int) -> bool:

@@ -154,5 +154,4 @@ def main():
     run(True)
 
 if __name__ == "__main__":
- for _ in range(3):
     main()

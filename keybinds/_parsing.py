@@ -6,8 +6,25 @@ from typing import List, Set, Tuple, FrozenSet
 from ._constants import _MOD_GROUPS, SPECIAL_KEYS
 
 
+def _normalize_token(t: str) -> str:
+    t = t.strip().lower().replace("-", " ")
+    t = " ".join(t.split())  # схлопнуть лишние пробелы
+
+    aliases = {
+        "left shift": "lshift",
+        "right shift": "rshift",
+        "left ctrl": "lctrl",
+        "left control": "lctrl",
+        "right ctrl": "rctrl",
+        "right control": "rctrl",
+        "left alt": "lalt",
+        "right alt": "ralt",
+    }
+    return aliases.get(t, t.replace(" ", ""))
+
+
 def _token_to_vk_group(token: str) -> Set[int]:
-    t = token.strip().lower()
+    t = _normalize_token(token)
     if not t:
         raise ValueError("empty key token")
 

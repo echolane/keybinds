@@ -109,6 +109,8 @@ hook.bind(
 * common keys: `esc`, `enter`, `space`, arrows, etc.
 * common punctuation (OEM-based): `` ` ``, `-`, `=`, `[`, `]`, `\`, `;`, `'`, `,`, `.`, `/`
 * modifier aliases: `ctrl`, `control`, `shift`, `alt`, `menu`, `win`, `lwin`, `rwin`
+* side-specific modifiers: `lctrl`, `rctrl`, `lshift`, `rshift`, `lalt`, `ralt`, `left ctrl`, `right alt`, etc.
+* numpad keys: `num0`..`num9`, `numpad0`..`numpad9`, `numlock`, `num/`, `num*`, `num-`, `num+`, `num.`
 
 ### Custom token registration
 
