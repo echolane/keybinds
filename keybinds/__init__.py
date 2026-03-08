@@ -29,7 +29,7 @@ from . import presets
 
 from ._constants import register_key_token
 
-__version__ = "1.1.3"
+__version__ = "1.2.0"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy",
