@@ -1,4 +1,3 @@
-
 # keybinds
 
 Flexible and high-performance global keyboard & mouse hotkeys for Windows.
@@ -37,21 +36,21 @@ pip install keybinds
 
 ---
 
-## Comparison (Windows hotkeys)
+## When to use keybinds
 
-| Feature | keybinds | keyboard | pynput | AutoHotkey |
-|---|---:|---:|---:|---:|
-| Cross-platform | ❌ (Windows only) | ⚠️ Windows/Linux (+ experimental macOS) | ✅ | ❌ (Windows only) |
-| Python-native library | ✅ | ✅ | ✅ | ❌ (separate DSL/tool) |
-| Global keyboard hooks | ✅ | ✅ | ✅ | ✅ |
-| Chords / combos | ✅ | ✅ | ✅* | ✅ |
-| Sequences | ✅ | ✅ | ❌ | ✅ |
-| Window-scoped/context hotkeys | ✅ (`hwnd`) | ❌ | ❌ | ✅ |
-| Async callbacks (`asyncio`) | ✅ | ❌ | ❌ | ❌ |
-| Built-in trigger model (hold/repeat/double-tap/sequence/chord lifecycle) | ✅ | ⚠️ partial | ❌ | ⚠️ script-level patterns |
-| Fine-grained constraints (strict chords, order policy, injected policy) | ✅ | ❌ | ❌ | ⚠️ possible, but not as a Python API model |
+**keybinds** is for Windows applications that need more than basic hotkeys.
 
-\* `pynput` provides `HotKey` / `GlobalHotKeys` for combinations, but not built-in sequence-style hotkeys.
+Use it when your app needs:
+
+- global keyboard and mouse binds
+- strict chords and key sequences
+- advanced trigger behavior such as hold, repeat, and double tap
+- suppression control and injected-input filtering
+- a binding model that scales from simple shortcuts to more complex setups
+- configuration-driven binds, presets, and async callbacks
+
+If you only need a few simple shortcuts, a smaller hotkey library may be enough.
+If you need raw event streams instead of bind matching, a lower-level input library may be a better fit.
 
 ---
 
