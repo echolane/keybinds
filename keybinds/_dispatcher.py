@@ -3,9 +3,10 @@ from __future__ import annotations
 import queue
 import threading
 from traceback import print_exc
-from typing import Callable, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
 
 from .types import Callback
+from .diagnostics import _NULL_DISPATCH_TRACE, _DispatchTrace
 
 if TYPE_CHECKING:
     import asyncio
@@ -28,13 +29,9 @@ class _CallbackDispatcher:
             asyncio_loop: "Optional[asyncio.AbstractEventLoop]" = None,
             on_async_error: Optional[Callable[[BaseException], None]] = None
     ) -> None:
-        self._q: "queue.SimpleQueue[Optional[Callback]]" = queue.SimpleQueue()
+        self._q: "queue.SimpleQueue[Optional[Tuple[Callback, _DispatchTrace]]]" = queue.SimpleQueue()
         self._threads: List[threading.Thread] = []
         self._workers = max(1, int(workers))
-        for i in range(self._workers):
-            t = threading.Thread(target=self._worker, name=f"bind-worker-{i}", daemon=True)
-            t.start()
-            self._threads.append(t)
 
         self._async_loop: "Optional[asyncio.AbstractEventLoop]" = asyncio_loop
         self._on_async_error: Optional[Callable[[BaseException], None]] = on_async_error
@@ -54,8 +51,9 @@ class _CallbackDispatcher:
     def start(self) -> None:
         if self.stopped or not self._threads:
             self._stopped = False
+            self._threads = []
             for i in range(self._workers):
-                t = threading.Thread(target=self._worker, name=f"bind-worker-{i}", daemon=True)
+                t = threading.Thread(target=self._worker, name="bind-worker-{0}".format(i), daemon=True)
                 t.start()
                 self._threads.append(t)
 
@@ -71,24 +69,38 @@ class _CallbackDispatcher:
                 self._async.stop()
                 self._async = None
 
-    def _submit_awaitable(self, aw) -> None:
+    def _submit_awaitable(self, aw: Any, trace: Optional[_DispatchTrace] = None) -> None:
         if self._async is None:
             from ._async import _AsyncLoopThread
             self._async = _AsyncLoopThread(self._async_loop, on_async_error=self._on_async_error)
-        self._async.submit(aw)
+        if trace is None:
+            trace = _NULL_DISPATCH_TRACE
+        trace.async_scheduled()
+        self._async.submit(aw, trace=trace)
 
-    def submit(self, fn: Callback) -> None:
-        self._q.put(fn)
+    def submit(self, fn: Callback, trace: Optional[_DispatchTrace] = None) -> None:
+        if trace is None:
+            trace = _NULL_DISPATCH_TRACE
+        trace.queued()
+        self._q.put((fn, trace))
 
     def _worker(self) -> None:
         while True:
-            fn = self._q.get()
-            if fn is None:
+            item: Optional[Tuple[Callback, _DispatchTrace]] = self._q.get()
+            if item is None:
                 return
+            fn, trace = item
+            if trace is None:
+                trace = _NULL_DISPATCH_TRACE
+            trace.started()
             try:
                 res = fn()
                 if _is_awaitable(res):
-                    self._submit_awaitable(res)
-            except Exception:
+                    trace.returned_awaitable()
+                    self._submit_awaitable(res, trace=trace)
+                else:
+                    trace.finished()
+            except Exception as exc:
+                trace.error(exc)
                 # never let user callbacks kill the worker
                 print_exc()

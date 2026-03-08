@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, Optional, Set, List, TYPE_CHECKING
+from typing import Callable, Optional, Set, List
 
 from . import winput
 
@@ -20,10 +20,9 @@ from ._constants import (
     is_modifier_vk,
 )
 from ._parsing import _ChordSpec, parse_key_expr
+from .diagnostics import _DiagnosticsManager
 from ._base_bind import BaseBind
-
-if TYPE_CHECKING:
-    from ._state import InputState
+from ._state import InputState
 
 
 class _StrictOrderState:
@@ -234,10 +233,12 @@ class Bind(BaseBind[winput.KeyboardEvent]):
         *,
         config: Optional[BindConfig] = None,
         hwnd: Optional[int] = None,
-        dispatch: Optional[Callable[[Callback], None]] = None,
+        dispatch: Optional[Callable[..., None]] = None,
+        diagnostics: Optional[_DiagnosticsManager] = None,
     ) -> None:
-        super().__init__(callback, config=config or BindConfig(), hwnd=hwnd, dispatch=dispatch)
+        super().__init__(callback, config=config or BindConfig(), hwnd=hwnd, dispatch=dispatch, diagnostics=diagnostics)
         self.expr = expr
+        self._set_diagnostics_identity(self.expr, "keyboard")
         self.steps = parse_key_expr(expr)
         self.is_sequence = len(self.steps) > 1
 
@@ -336,18 +337,21 @@ class Bind(BaseBind[winput.KeyboardEvent]):
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
         with self._lock:
+            trace = self._trace(event)
             now_ms = int(event.time)
 
-            if not self._window_ok():
+            if not self._window_ok(trace=trace):
                 return winput.WP_CONTINUE
 
-            if self.config.checks.predicates and not self._checks_ok(event, state):
+            if self.config.checks.predicates and not self._checks_ok(event, state, trace=trace):
                 return winput.WP_CONTINUE
 
             if not self._debounce_ok(now_ms):
+                trace.skip("debounce_filtered", debounce_ms=self.config.timing.debounce_ms)
                 return winput.WP_CONTINUE
 
             if not self._step_timeout_ok(now_ms):
+                trace.skip("sequence_timeout", seq_index=self._seq_index)
                 self.reset()
 
             self._last_event_ms = now_ms
@@ -355,8 +359,10 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             inj = bool(getattr(event, "injected", False))
             pol = self.config.injected
             if pol == InjectedPolicy.IGNORE and inj:
+                trace.skip("injected_ignored")
                 return winput.WP_CONTINUE
             if pol == InjectedPolicy.ONLY and not inj:
+                trace.skip("injected_only_but_physical")
                 return winput.WP_CONTINUE
 
             chord = self.steps[self._seq_index]
@@ -386,6 +392,10 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             full = self._match_chord(chord, pressed)
             if is_strict and full:
                 if not self._strict_order.allows_full(chord, pressed, recoverable=is_recoverable):
+                    if self._strict_order.invalid:
+                        trace.skip("strict_order_invalid")
+                    elif self._strict_order.attempt_invalid:
+                        trace.skip("strict_order_attempt_invalid")
                     full = False
 
             if is_strict and full and not prev_full:
@@ -400,6 +410,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             # Rearm ON_RELEASE every time chord becomes full (not_full -> full).
             if full and not prev_full:
                 self._release_armed = True
+                trace.match("chord_became_full", seq_index=self._seq_index)
 
             # Is any chord key still held?
             any_chord_key_pressed = False
@@ -408,18 +419,49 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                     any_chord_key_pressed = True
                     break
 
+            event_targets_this_bind = (vk_evt in chord.allowed_union)
+            diagnostic_relevant = (
+                full
+                or prev_full
+                or self._had_full
+                or self._release_armed
+                or any_chord_key_pressed
+                or (self._seq_index > 0)
+                or event_targets_this_bind
+                or (is_modifier_vk(vk_evt) and (any_chord_key_pressed or prev_full or self._seq_index > 0))
+                or (self._click_down_ms is not None)
+                or (self._tap_count > 0)
+                or (self._press_suppress_vk is not None)
+            )
+
+            if diagnostic_relevant:
+                trace.note(
+                    "decision",
+                    "candidate_state",
+                    vk=vk_evt,
+                    is_down=is_down,
+                    is_up=is_up,
+                    is_repeat=is_repeat,
+                    full=full,
+                    seq_index=self._seq_index,
+                    pressed_count=len(pressed),
+                    any_chord_key_pressed=any_chord_key_pressed,
+                )
+
             flags = winput.WP_CONTINUE
 
             sup = self.config.suppress
-            relevant = (vk_evt in chord.allowed_union) or is_modifier_vk(vk_evt)
+            relevant = event_targets_this_bind or is_modifier_vk(vk_evt)
 
             if sup == SuppressPolicy.ALWAYS:
                 flags |= winput.WP_DONT_PASS_INPUT_ON
+                trace.suppress("suppressed_always")
 
             elif sup == SuppressPolicy.WHILE_ACTIVE:
                 # suppress only when chord is fully active
                 if self._armed and relevant:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_while_active", relevant=relevant)
 
             elif sup == SuppressPolicy.WHILE_EVALUATING:
                 # suppress already during chord evaluation (partial progress)
@@ -436,11 +478,13 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                                 break
                 if in_progress and relevant:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_while_evaluating", relevant=relevant)
 
             # WHEN_MATCHED: suppress paired KEYUP after a successful ON_PRESS fire
             elif self.config.suppress == SuppressPolicy.WHEN_MATCHED and self._press_suppress_vk is not None:
                 if is_up and vk_evt == self._press_suppress_vk:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_when_matched", paired_vk=vk_evt)
                     self._press_suppress_vk = None
 
             # safety: if chord cycle ended without seeing that keyup (rare), clear it
@@ -450,21 +494,27 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             # --- end suppress ---
 
             trig = self.config.trigger
+            trig_name = trig.name.lower()
 
-            def fire_if_allowed(ts_ms: int) -> bool:
-                if self._cooldown_ok(ts_ms) and self._max_fires_ok():
-                    self._fires += 1
-                    self._last_fire_ms = ts_ms
-                    self._fire()
-                    return True
-                return False
+            def fire_if_allowed(ts_ms: int):
+                if not self._cooldown_ok(ts_ms, trace=trace):
+                    return None
+                if not self._max_fires_ok(trace=trace):
+                    return None
+                self._fires += 1
+                self._last_fire_ms = ts_ms
+                dispatch_trace = trace.fire(trigger=trig_name, seq_index=self._seq_index)
+                self._fire(dispatch_trace)
+                return dispatch_trace
 
             # Sequence
             if self.is_sequence:
                 if is_repeat:
+                    if diagnostic_relevant:
+                        trace.skip("trigger_not_satisfied", detail="sequence_ignores_repeat")
                     return flags
 
-                if fresh_down and (vk_evt not in chord.allowed_union):
+                if self._seq_index > 0 and fresh_down and (vk_evt not in chord.allowed_union):
                     cpol = self.config.constraints.chord_policy
 
                     foreign_ok = False
@@ -481,6 +531,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                         foreign_ok = (vk_evt in self.config.constraints.ignore_keys)
 
                     if not foreign_ok:
+                        trace.skip("sequence_reset_foreign_key", vk=vk_evt, seq_index=self._seq_index)
                         self.reset()
                         return flags
 
@@ -488,10 +539,13 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                     self._seq_last_ms = now_ms
                     if self._seq_index == len(self.steps) - 1:
                         if trig in (Trigger.ON_SEQUENCE, Trigger.ON_PRESS, Trigger.ON_CHORD_COMPLETE):
-                            if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                            fired = fire_if_allowed(now_ms)
+                            if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                                 flags |= winput.WP_DONT_PASS_INPUT_ON
+                                trace.suppress("suppressed_when_matched", trigger=trig_name)
                         self.reset()
                     else:
+                        trace.match("sequence_advanced", seq_index=self._seq_index, next_index=self._seq_index + 1)
                         self._seq_index += 1
                         self._strict_order.reset()
 
@@ -507,14 +561,18 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             # -------------------------
 
             if trig == Trigger.ON_PRESS and full and fresh_down and (vk_evt in chord.allowed_union):
-                if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                fired = fire_if_allowed(now_ms)
+                if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_when_matched", trigger=trig_name)
                     self._press_suppress_vk = vk_evt  # keyup suppress
 
             elif trig == Trigger.ON_CHORD_COMPLETE and full and fresh_down and not prev_full and (vk_evt in chord.allowed_union):
                 # Fires only on transition NOT_FULL -> FULL
-                if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                fired = fire_if_allowed(now_ms)
+                if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_when_matched", trigger=trig_name)
                     self._press_suppress_vk = vk_evt
 
             elif trig == Trigger.ON_RELEASE:
@@ -523,6 +581,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 if self._had_full and self._release_armed and (vk_evt in chord.allowed_union):
                     if self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                         flags |= winput.WP_DONT_PASS_INPUT_ON
+                        trace.suppress("suppressed_when_matched", trigger=trig_name)
 
                     if is_up:
                         fire_if_allowed(now_ms)
@@ -531,8 +590,10 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             elif trig == Trigger.ON_CHORD_RELEASED:
                 # Fires when ALL chord keys are released AFTER chord was fully pressed.
                 if self._had_full and is_up and (vk_evt in chord.allowed_union) and (not any_chord_key_pressed):
-                    if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                    fired = fire_if_allowed(now_ms)
+                    if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                         flags |= winput.WP_DONT_PASS_INPUT_ON
+                        trace.suppress("suppressed_when_matched", trigger=trig_name)
                     # end cycle
                     self._had_full = False
                     self._release_armed = False
@@ -540,15 +601,21 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
             elif trig == Trigger.ON_CLICK:
                 if is_repeat:
-                    pass
+                    if diagnostic_relevant or (self._click_down_ms is not None):
+                        trace.skip("trigger_not_satisfied", detail="click_ignores_repeat")
                 elif full and fresh_down:
                     self._click_down_ms = now_ms
+                    trace.note("decision", "click_started")
                 elif is_up and self._click_down_ms is not None:
                     dur = now_ms - self._click_down_ms
                     self._click_down_ms = None
                     if dur <= self.config.timing.hold_ms:
-                        if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                        fired = fire_if_allowed(now_ms)
+                        if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                             flags |= winput.WP_DONT_PASS_INPUT_ON
+                            trace.suppress("suppressed_when_matched", trigger=trig_name)
+                    else:
+                        trace.skip("hold_not_long_enough", duration_ms=dur, hold_ms=self.config.timing.hold_ms)
 
             elif trig == Trigger.ON_HOLD:
                 if full and fresh_down and not is_repeat:
@@ -556,17 +623,24 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
                     self._hold_token += 1
                     token = self._hold_token
+                    trace.note("decision", "hold_timer_started", hold_ms=hold_ms)
 
                     def _hold() -> None:
                         time.sleep(max(0, hold_ms) / 1000.0)
                         with self._lock:
-                            if token != self._hold_token or not self._window_ok(force=True):
+                            if token != self._hold_token:
+                                trace.skip("hold_timer_cancelled", reason_detail="token_changed")
+                                return
+                            if not self._window_ok(force=True, trace=trace):
+                                trace.skip("hold_timer_cancelled", reason_detail="window_mismatch")
                                 return
 
-                            pressed = self._get_pressed_for_policy(state, inj=inj)
-                            if self._match_chord(chord, pressed):
+                            if self._armed:
+                                trace.note("decision", "hold_timer_fired")
                                 now2 = int(time.monotonic() * 1000)
                                 fire_if_allowed(now2)
+                            else:
+                                trace.skip("hold_timer_cancelled", reason_detail="chord_not_held")
 
                     threading.Thread(target=_hold, daemon=True).start()
 
@@ -577,18 +651,29 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
                     self._hold_token += 1
                     token = self._hold_token
+                    trace.note(
+                        "decision",
+                        "repeat_started",
+                        repeat_delay_ms=int(delay_s * 1000),
+                        repeat_interval_ms=int(interval_s * 1000),
+                    )
 
                     def _repeat() -> None:
                         time.sleep(max(0.0, delay_s))
                         while True:
                             with self._lock:
-                                if token != self._hold_token or not self._window_ok(force=True):
+                                if token != self._hold_token:
+                                    trace.skip("repeat_cancelled", reason_detail="token_changed")
+                                    break
+                                if not self._window_ok(force=True, trace=trace):
+                                    trace.skip("repeat_cancelled", reason_detail="window_mismatch")
                                     break
 
-                                pressed = self._get_pressed_for_policy(state, inj=inj)
-                                if not self._match_chord(chord, pressed):
+                                if not self._armed:
+                                    trace.skip("repeat_cancelled", reason_detail="chord_not_held")
                                     break
                                 now2 = int(time.monotonic() * 1000)
+                                trace.note("decision", "repeat_tick")
                                 fire_if_allowed(now2)
                             time.sleep(interval_s)
 
@@ -601,11 +686,17 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 else:
                     self._tap_count = 1
                 self._tap_last_ms = now_ms
+                trace.note("decision", "double_tap_progress", tap_count=self._tap_count, window_ms=win)
 
                 if self._tap_count >= 2:
                     self._tap_count = 0
-                    if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                    fired = fire_if_allowed(now_ms)
+                    if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                         flags |= winput.WP_DONT_PASS_INPUT_ON
+                        trace.suppress("suppressed_when_matched", trigger=trig_name)
+
+            if trig in (Trigger.ON_HOLD, Trigger.ON_REPEAT) and prev_full and not full:
+                self._hold_token += 1
 
             # end cycle if fully released
             if not any_chord_key_pressed:

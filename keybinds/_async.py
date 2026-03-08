@@ -4,10 +4,11 @@ import threading
 import traceback
 from typing import Any, Callable, Coroutine, Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from concurrent.futures import Future
+from .diagnostics import _NULL_DISPATCH_TRACE, _DispatchTrace
 
+if TYPE_CHECKING:
     import asyncio
+    from concurrent.futures import Future
 
 
 def _default_on_async_error(exc: BaseException) -> None:
@@ -81,24 +82,33 @@ class _AsyncLoopThread:
             self._thread.start()
             self._started = True
 
-    def submit(self, coro: Coroutine[Any, Any, Any]) -> Future:
+    def submit(self, coro: Coroutine[Any, Any, Any], trace: Optional[_DispatchTrace] = None) -> Future:
         import asyncio
         self._ensure_started()
         assert self._loop is not None
+        if trace is None:
+            trace = _NULL_DISPATCH_TRACE
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        fut.add_done_callback(self._done_callback)
+
+        def _done(done_fut: Future) -> None:
+            self._done_callback(done_fut, trace)
+
+        fut.add_done_callback(_done)
         return fut
 
-    def _done_callback(self, fut: Future) -> None:
+    def _done_callback(self, fut: Future, trace: _DispatchTrace) -> None:
         try:
             exc = fut.exception()
         except Exception:
             return
         if exc is not None:
+            trace.async_error(exc)
             try:
                 self._on_async_error(exc)
             except Exception:
                 pass
+        else:
+            trace.async_finished()
 
     def stop(self) -> None:
         if not self._own_loop:

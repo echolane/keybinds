@@ -7,11 +7,14 @@ from typing import Callable, Optional, Union, Generator, List, Tuple, TYPE_CHECK
 from ._backend import _GlobalBackend
 from ._dispatcher import _CallbackDispatcher
 from ._keyboard import Bind
-from ._mouse import MouseBind
+from ._mouse import MouseBind, _normalize_mouse_button
 from .types import BindConfig, MouseBindConfig, MouseButton, Callback
+from .diagnostics import DiagnosticRecord, DiagnosticsConfig, create_diagnostics_manager
 
 if TYPE_CHECKING:
     import asyncio
+    from .diagnostics.core import ExplainSelect
+    from .diagnostics.reporting import InputAttempt, ExplainReport
 
 _default_hook: Optional[Hook] = None
 
@@ -52,7 +55,8 @@ class Hook:
         default_mouse_config: Optional[MouseBindConfig] = None,
         asyncio_loop: "Optional[asyncio.AbstractEventLoop]" = None,
         on_async_error: Optional[Callable[[BaseException], None]] = None,
-        auto_start: bool = True
+        auto_start: bool = True,
+        diagnostics: Optional[DiagnosticsConfig] = None,
     ) -> None:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -64,7 +68,12 @@ class Hook:
         self.default_config = default_config
         self.default_mouse_config = default_mouse_config
 
-        self._dispatcher = _CallbackDispatcher(workers=callback_workers, asyncio_loop=asyncio_loop, on_async_error=on_async_error)
+        self._diagnostics = create_diagnostics_manager(diagnostics)
+        self._dispatcher = _CallbackDispatcher(
+            workers=callback_workers,
+            asyncio_loop=asyncio_loop,
+            on_async_error=on_async_error,
+        )
 
         # binds live in this frontend
         self._keyboard_binds: List[Bind] = []
@@ -98,7 +107,14 @@ class Hook:
 
     def bind(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, hwnd=None) -> Bind:
         cfg = config or self.default_config or BindConfig()
-        b = Bind(expr, callback, config=cfg, hwnd=hwnd, dispatch=self._dispatcher.submit)
+        b = Bind(
+            expr,
+            callback,
+            config=cfg,
+            hwnd=hwnd,
+            dispatch=self._dispatcher.submit,
+            diagnostics=self._diagnostics,
+        )
         with self._lock:
             self._keyboard_binds.append(b)
             self._keyboard_snapshot = tuple(self._keyboard_binds)
@@ -106,7 +122,14 @@ class Hook:
 
     def bind_mouse(self, button: Union[MouseButton, str], callback: Callback, *, config: Optional[MouseBindConfig] = None, hwnd=None) -> MouseBind:
         cfg = config or self.default_mouse_config or MouseBindConfig()
-        b = MouseBind(button, callback, config=cfg, hwnd=hwnd, dispatch=self._dispatcher.submit)
+        b = MouseBind(
+            button,
+            callback,
+            config=cfg,
+            hwnd=hwnd,
+            dispatch=self._dispatcher.submit,
+            diagnostics=self._diagnostics,
+        )
         with self._lock:
             self._mouse_binds.append(b)
             self._mouse_snapshot = tuple(self._mouse_binds)
@@ -231,13 +254,42 @@ class Hook:
             _GlobalBackend.instance().unregister(self)
             self._dispatcher.stop()
 
+    def get_recent_diagnostics(self, limit: Optional[int] = None) -> List[DiagnosticRecord]:
+        return self._diagnostics.get_recent(limit=limit)
+
+    def clear_diagnostics(self) -> None:
+        self._diagnostics.clear()
+
+    def get_recent_attempts(self, *, last_ms: int = 1500) -> List["InputAttempt"]:
+        from .diagnostics.analysis import collect_attempts
+        return collect_attempts(self.get_recent_diagnostics(), last_ms=last_ms, bind_meta=self._diagnostics.get_bind_metadata())
+
+    def explain(self, bind_or_expr, *, last_ms: int = 1500, select: "ExplainSelect" = "best") -> "ExplainReport":
+        from .diagnostics.analysis import explain_records
+        bind_name = getattr(bind_or_expr, "expr", None)
+        if bind_name is None:
+            btn = getattr(bind_or_expr, "button", None)
+            if btn is not None:
+                bind_name = getattr(btn, "name", str(btn)).lower()
+        if bind_name is None:
+            bind_name = str(bind_or_expr)
+        return explain_records(bind_name, self.get_recent_diagnostics(), last_ms=last_ms, bind_meta=self._diagnostics.get_bind_metadata(), select=select)
+
+    def explain_mouse(self, button: Union[MouseButton, str], *, last_ms: int = 1500, select: "ExplainSelect" = "best") -> "ExplainReport":
+        from .diagnostics.analysis import explain_records
+        normalized = _normalize_mouse_button(button)
+        bind_name = normalized.name.lower()
+        return explain_records(bind_name, self.get_recent_diagnostics(), last_ms=last_ms, bind_meta=self._diagnostics.get_bind_metadata(), select=select, device="mouse")
+
     # -------------------------
     # called by backend
     # -------------------------
 
     def _handle_keyboard_event(self, event, state) -> int:
+        event_id = self._diagnostics.prepare_event(event, "keyboard")
         with self._lock:
             if self._paused:
+                self._diagnostics.emit(kind="decision", reason="hook_paused", device="keyboard", event_id=event_id)
                 return 0
 
         snap = self._keyboard_snapshot
@@ -249,8 +301,10 @@ class Hook:
         return flags
 
     def _handle_mouse_event(self, event, state) -> int:
+        event_id = self._diagnostics.prepare_event(event, "mouse")
         with self._lock:
             if self._paused:
+                self._diagnostics.emit(kind="decision", reason="hook_paused", device="mouse", event_id=event_id)
                 return 0
 
         snap = self._mouse_snapshot

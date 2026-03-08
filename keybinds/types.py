@@ -4,11 +4,13 @@ from dataclasses import dataclass, field, replace, is_dataclass
 from enum import Enum, auto
 from typing import Callable, Optional, Union, Sequence, Set, Any, TypeVar, Awaitable
 
+
 SyncCallback = Callable[[], None]
 AsyncCallback = Callable[[], Awaitable[None]]
 Callback = Union[SyncCallback, AsyncCallback]
 
 Predicate = Callable[[Any, Any], bool]
+CheckPredicate = Predicate
 
 
 class Trigger(Enum):
@@ -83,13 +85,13 @@ class Constraints:
 
 @dataclass(frozen=True)
 class Checks:
-    predicates: Sequence[Predicate] = field(default_factory=tuple)
+    predicates: Sequence[CheckPredicate] = field(default_factory=tuple)
 
     def __iter__(self):
         return iter(self.predicates)
 
     @classmethod
-    def coerce(cls, value: Union[Checks, Sequence[Predicate], Predicate, None]) -> Checks:
+    def coerce(cls, value: Union[Checks, Sequence[CheckPredicate], CheckPredicate, None]) -> Checks:
         if value is None:
             return cls()
         if isinstance(value, cls):

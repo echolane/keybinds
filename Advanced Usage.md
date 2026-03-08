@@ -2,6 +2,8 @@
 
 This document covers advanced features and implementation-aware usage patterns of `keybinds` that are useful in real applications but too detailed for the main README.
 
+If you are trying to understand why a bind fired, did not fire, or stopped at a particular stage, see **[Diagnostics.md](./Diagnostics.md)**.
+
 ## Contents
 
 - [1) Trigger semantics (important differences)](#1-trigger-semantics-important-differences)

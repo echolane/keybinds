@@ -33,6 +33,7 @@ pip install keybinds
 
 * Windows
 * Python 3.7+
+* `typing_extensions` on Python 3.7
 
 ---
 
@@ -309,6 +310,8 @@ hook.bind("g,k,i",  lambda: print("combo"),   config=sequence(timeout_ms=600))
 
 More presets, profiles and composition patterns are in **[Advanced Usage.md](./Advanced%20Usage.md)**.
 
+If you are troubleshooting why a bind fired or did not fire, see **[Diagnostics.md](./Diagnostics.md)**.
+
 ---
 
 ## Simple API
@@ -316,7 +319,7 @@ More presets, profiles and composition patterns are in **[Advanced Usage.md](./A
 For common cases, use the lightweight decorator wrapper:
 
 ```python
-from keybinds.simple import hotkey, run
+from keybinds.simple import hotkey, mouse, run
 
 @hotkey("ctrl+e")
 def inventory():
@@ -329,6 +332,10 @@ def autofire():
 @hotkey("f", hold=400)
 def charge():
     print("Charged")
+
+@mouse("left")
+def on_left():
+    print("Mouse pressed")
 
 run()
 ```
@@ -348,9 +355,9 @@ Supports common patterns with simple flags:
 
 Measured using `examples/benchmark.py`:
 
-- p50 ≈ 0.21 ms  
-- p99 ≈ 0.35 ms  
-- max < 0.7 ms (rare spikes up to 3–5 ms)
+- p50 ≈ 0.29 ms  
+- p99 ≈ 0.48 ms  
+- max < 0.8 ms (rare spikes up to 3–5 ms)
 
 Latency includes hook dispatch and callback scheduling (no heavy user code).
 

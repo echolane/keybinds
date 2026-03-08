@@ -7,8 +7,10 @@ from ._constants import _MOD_GROUPS, SPECIAL_KEYS
 
 
 def _normalize_token(t: str) -> str:
-    t = t.strip().lower().replace("-", " ")
-    t = " ".join(t.split())  # схлопнуть лишние пробелы
+    t = t.strip().lower()
+    t = " ".join(t.split())  # remove extra spaces
+    if t != "-":
+        t = t.replace("-", " ")
 
     aliases = {
         "left shift": "lshift",
@@ -52,21 +54,39 @@ class _ChordSpec:
 
 
 def parse_chord(expr: str) -> _ChordSpec:
-    parts = [p.strip() for p in expr.split("+") if p.strip()]
-    if not parts:
+    expr = expr.strip()
+    if not expr:
         raise ValueError("empty chord")
+
+    parts = [p.strip() for p in expr.split("+")]
+    if any(not p for p in parts):
+        raise ValueError(f"invalid chord syntax: {expr!r}")
 
     groups: List[FrozenSet[int]] = []
     union: Set[int] = set()
+
     for p in parts:
-        g = frozenset(_token_to_vk_group(p))
+        try:
+            g = frozenset(_token_to_vk_group(p))
+        except ValueError as e:
+            raise ValueError(f"unknown key token: {p!r}") from e
+
         groups.append(g)
-        union |= set(g)
+        union |= g
+
     return _ChordSpec(tuple(groups), frozenset(union))
 
 
 def parse_key_expr(expr: str) -> Tuple[_ChordSpec, ...]:
-    steps = [s.strip() for s in expr.split(",") if s.strip()]
-    if not steps:
+    expr = expr.strip()
+    if not expr:
         raise ValueError("empty key expression")
-    return tuple(parse_chord(step) for step in steps)
+
+    steps = [s.strip() for s in expr.split(",")]
+    if any(not s for s in steps):
+        raise ValueError(f"invalid key expression syntax: {expr!r}")
+
+    try:
+        return tuple(parse_chord(step) for step in steps)
+    except ValueError as e:
+        raise ValueError(f"invalid key expression: {expr!r}") from e

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Set
 
 from . import winput
 
@@ -38,7 +38,7 @@ WM_MOUSEWHEEL = getattr(winput, "WM_MOUSEWHEEL", 0x020A)
 WM_MOUSEHWHEEL = getattr(winput, "WM_MOUSEHWHEEL", 0x020E)
 
 
-_MOD_GROUPS = {
+_MOD_GROUPS: Dict[str, Set[int]] = {
     "shift": {VK_SHIFT, VK_LSHIFT, VK_RSHIFT},
     "lshift": {VK_LSHIFT},
     "rshift": {VK_RSHIFT},
@@ -54,6 +54,7 @@ _MOD_GROUPS = {
     "menu": {VK_MENU, VK_LMENU, VK_RMENU},
     "lalt": {VK_LMENU},
     "ralt": {VK_RMENU},
+    "altgr": {VK_RMENU},
 
     "win": {VK_LWIN, VK_RWIN},
     "lwin": {VK_LWIN},
@@ -82,36 +83,80 @@ SPECIAL_KEYS: Dict[str, int] = {
     "down": getattr(winput, "VK_DOWN", 0x28),
     "left": getattr(winput, "VK_LEFT", 0x25),
     "right": getattr(winput, "VK_RIGHT", 0x27),
-    "volumeup": getattr(winput, "VK_VOLUMEUP", 0xAF),
-    "volumedown": getattr(winput, "VK_VOLUMEDOWN", 0xAE),
-    "mute": getattr(winput, "VK_VOLUMEMUTE", 0xAD),
+
+    "capslock": getattr(winput, "VK_CAPITAL", 0x14),
+    "caps": getattr(winput, "VK_CAPITAL", 0x14),
+
+    "pause": getattr(winput, "VK_PAUSE", 0x13),
+    "break": getattr(winput, "VK_PAUSE", 0x13),
+
+    "printscreen": getattr(winput, "VK_SNAPSHOT", 0x2C),
+    "prtsc": getattr(winput, "VK_SNAPSHOT", 0x2C),
+    "snapshot": getattr(winput, "VK_SNAPSHOT", 0x2C),
+
+    "scrolllock": getattr(winput, "VK_SCROLL", 0x91),
+    "scroll": getattr(winput, "VK_SCROLL", 0x91),
+
+    "apps": getattr(winput, "VK_APPS", 0x5D),
+    "menukey": getattr(winput, "VK_APPS", 0x5D),
+    "contextmenu": getattr(winput, "VK_APPS", 0x5D),
+
+    "clear": getattr(winput, "VK_CLEAR", 0x0C),
+    "help": getattr(winput, "VK_HELP", 0x2F),
+    "select": getattr(winput, "VK_SELECT", 0x29),
+    "execute": getattr(winput, "VK_EXECUTE", 0x2B),
+    "print": getattr(winput, "VK_PRINT", 0x2A),
+    "sleep": getattr(winput, "VK_SLEEP", 0x5F),
+
+    "volumeup": getattr(winput, "VK_VOLUME_UP", 0xAF),
+    "volup": getattr(winput, "VK_VOLUME_UP", 0xAF),
+    "volumedown": getattr(winput, "VK_VOLUME_DOWN", 0xAE),
+    "voldown": getattr(winput, "VK_VOLUME_DOWN", 0xAE),
+    "volumemute": getattr(winput, "VK_VOLUME_MUTE", 0xAD),
+    "mute": getattr(winput, "VK_VOLUME_MUTE", 0xAD),
+
+    "medianext": getattr(winput, "VK_MEDIA_NEXT_TRACK", 0xB0),
+    "medianexttrack": getattr(winput, "VK_MEDIA_NEXT_TRACK", 0xB0),
+    "mediaprev": getattr(winput, "VK_MEDIA_PREV_TRACK", 0xB1),
+    "mediaprevtrack": getattr(winput, "VK_MEDIA_PREV_TRACK", 0xB1),
+    "mediastop": getattr(winput, "VK_MEDIA_STOP", 0xB2),
+    "mediaplaypause": getattr(winput, "VK_MEDIA_PLAY_PAUSE", 0xB3),
 }
-
-SPECIAL_KEYS.update({
-    "`": getattr(winput, "VK_OEM_3", 0xC0),        # `~
-    "backtick": getattr(winput, "VK_OEM_3", 0xC0),
-    "grave": getattr(winput, "VK_OEM_3", 0xC0),
-    "tilde": getattr(winput, "VK_OEM_3", 0xC0),
-
-    "-": getattr(winput, "VK_OEM_MINUS", 0xBD),   # -_
-    "=": getattr(winput, "VK_OEM_PLUS", 0xBB),    # =+
-    "[": getattr(winput, "VK_OEM_4", 0xDB),       # [{
-    "]": getattr(winput, "VK_OEM_6", 0xDD),       # ]}
-    "\\": getattr(winput, "VK_OEM_5", 0xDC),      # \|
-    ";": getattr(winput, "VK_OEM_1", 0xBA),       # ;:
-    "'": getattr(winput, "VK_OEM_7", 0xDE),       # '"
-    ",": getattr(winput, "VK_OEM_COMMA", 0xBC),   # ,<
-    ".": getattr(winput, "VK_OEM_PERIOD", 0xBE),  # .>
-    "/": getattr(winput, "VK_OEM_2", 0xBF),       # /?
-})
 
 for i in range(1, 25):
     SPECIAL_KEYS[f"f{i}"] = getattr(winput, f"VK_F{i}", 0x70 + (i - 1))
 
-for i in range(10):
-    vk = getattr(winput, f"VK_NUMPAD{i}", 0x60 + i)
-    SPECIAL_KEYS[f"numpad{i}"] = vk
-    SPECIAL_KEYS[f"num{i}"] = vk
+SPECIAL_KEYS.update({
+    "`": getattr(winput, "VK_OEM_3", 0xC0),
+    "backtick": getattr(winput, "VK_OEM_3", 0xC0),
+    "grave": getattr(winput, "VK_OEM_3", 0xC0),
+    "tilde": getattr(winput, "VK_OEM_3", 0xC0),
+
+    "-": getattr(winput, "VK_OEM_MINUS", 0xBD),
+    "=": getattr(winput, "VK_OEM_PLUS", 0xBB),
+    "[": getattr(winput, "VK_OEM_4", 0xDB),
+    "]": getattr(winput, "VK_OEM_6", 0xDD),
+    "\\": getattr(winput, "VK_OEM_5", 0xDC),
+    ";": getattr(winput, "VK_OEM_1", 0xBA),
+    "'": getattr(winput, "VK_OEM_7", 0xDE),
+    ",": getattr(winput, "VK_OEM_COMMA", 0xBC),
+    ".": getattr(winput, "VK_OEM_PERIOD", 0xBE),
+    "/": getattr(winput, "VK_OEM_2", 0xBF),
+
+    "minus": getattr(winput, "VK_OEM_MINUS", 0xBD),
+    "equals": getattr(winput, "VK_OEM_PLUS", 0xBB),
+    "plus": getattr(winput, "VK_OEM_PLUS", 0xBB),
+    "lbracket": getattr(winput, "VK_OEM_4", 0xDB),
+    "rbracket": getattr(winput, "VK_OEM_6", 0xDD),
+    "backslash": getattr(winput, "VK_OEM_5", 0xDC),
+    "semicolon": getattr(winput, "VK_OEM_1", 0xBA),
+    "quote": getattr(winput, "VK_OEM_7", 0xDE),
+    "apostrophe": getattr(winput, "VK_OEM_7", 0xDE),
+    "comma": getattr(winput, "VK_OEM_COMMA", 0xBC),
+    "period": getattr(winput, "VK_OEM_PERIOD", 0xBE),
+    "dot": getattr(winput, "VK_OEM_PERIOD", 0xBE),
+    "slash": getattr(winput, "VK_OEM_2", 0xBF),
+})
 
 SPECIAL_KEYS.update({
     "numlock": getattr(winput, "VK_NUMLOCK", 0x90),
@@ -136,6 +181,11 @@ SPECIAL_KEYS.update({
     "numdiv": getattr(winput, "VK_DIVIDE", 0x6F),
     "numpaddivide": getattr(winput, "VK_DIVIDE", 0x6F),
 })
+
+for i in range(10):
+    vk = getattr(winput, f"VK_NUMPAD{i}", 0x60 + i)
+    SPECIAL_KEYS[f"numpad{i}"] = vk
+    SPECIAL_KEYS[f"num{i}"] = vk
 
 
 def is_modifier_vk(vk: int) -> bool:

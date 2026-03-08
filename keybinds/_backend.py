@@ -27,7 +27,7 @@ class _GlobalBackend:
       - dispatches events to all active Hook instances
     """
 
-    _instance: Optional["_GlobalBackend"] = None
+    _instance: Optional[_GlobalBackend] = None
     _instance_lock = threading.Lock()
 
     def __init__(self) -> None:

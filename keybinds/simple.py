@@ -5,12 +5,13 @@ from typing import Any, Optional, Dict
 
 from keybinds import get_default_hook as get_hook, join
 from keybinds.bind import Hook
-from keybinds.decorators import bind_key
+from keybinds.decorators import bind_key, bind_mouse
 from keybinds.types import (
     BindConfig,
     SuppressPolicy,
     Trigger,
     Timing,
+    MouseBindConfig,
 )
 
 
@@ -85,6 +86,60 @@ def _build_config(
     return cfg
 
 
+def _build_mouse_config(
+    *,
+    release: bool = False,
+    hold: Optional[int] = None,
+    repeat: Optional[int] = None,
+    double_tap: bool = False,
+    suppress: bool = False,
+    delay: Optional[int] = None,
+    double_tap_window: Optional[int] = None,
+) -> MouseBindConfig:
+    exclusive_flags = [
+        release,
+        hold is not None,
+        repeat is not None,
+        double_tap,
+    ]
+    if sum(bool(x) for x in exclusive_flags) > 1:
+        raise ValueError(
+            "Conflicting flags: use only one of "
+            "release / hold / repeat / double_tap"
+        )
+
+    trigger = Trigger.ON_PRESS
+    timing_kwargs: Dict[str, int] = {}
+
+    if hold is not None:
+        trigger = Trigger.ON_HOLD
+        timing_kwargs["hold_ms"] = int(hold)
+
+    elif repeat is not None:
+        trigger = Trigger.ON_REPEAT
+        timing_kwargs["repeat_interval_ms"] = int(repeat)
+        if delay is not None:
+            timing_kwargs["repeat_delay_ms"] = int(delay)
+
+    elif double_tap:
+        trigger = Trigger.ON_DOUBLE_TAP
+        if double_tap_window is not None:
+            timing_kwargs["double_tap_window_ms"] = int(double_tap_window)
+
+    elif release:
+        trigger = Trigger.ON_RELEASE
+
+    cfg = MouseBindConfig(trigger=trigger)
+
+    if timing_kwargs:
+        cfg = cfg + MouseBindConfig(timing=Timing(**timing_kwargs))
+
+    if suppress:
+        cfg = cfg + MouseBindConfig(suppress=SuppressPolicy.WHEN_MATCHED)
+
+    return cfg
+
+
 def hotkey(
     expr: str,
     *,
@@ -128,6 +183,44 @@ def hotkey(
     )
 
     return bind_key(expr, config=cfg, hwnd=hwnd, hook=target_hook)
+
+
+def mouse(
+    button: str = "left",
+    *,
+    release: bool = False,
+    hold: Optional[int] = None,
+    repeat: Optional[int] = None,
+    double_tap: bool = False,
+    suppress: bool = False,
+    delay: Optional[int] = None,
+    double_tap_window: Optional[int] = None,
+    hwnd: Optional[int] = None,
+    hook: Optional[Hook] = None,
+):
+    """
+    Simple decorator API for common mouse binds.
+
+    Examples:
+        @mouse()
+        @mouse("right")
+        @mouse("left", release=True)
+        @mouse("middle", hold=300)
+        @mouse("x1", double_tap=True, double_tap_window=250)
+    """
+    target_hook = hook or get_hook()
+
+    cfg = _build_mouse_config(
+        release=release,
+        hold=hold,
+        repeat=repeat,
+        double_tap=double_tap,
+        suppress=suppress,
+        delay=delay,
+        double_tap_window=double_tap_window,
+    )
+
+    return bind_mouse(button, config=cfg, hwnd=hwnd, hook=target_hook)
 
 
 def wait(timeout: Optional[float] = None, *, hook: Optional[Hook] = None) -> bool:

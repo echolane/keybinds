@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from traceback import print_exc
-from typing import Callable, Optional, Union, Tuple, TYPE_CHECKING
+from typing import Callable, Optional, Union, Tuple
 
 from . import winput
 
@@ -14,10 +13,10 @@ from ._constants import (
     WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
 )
+from .diagnostics import _DiagnosticsManager, _EventTrace
 from ._base_bind import BaseBind
+from ._state import InputState
 
-if TYPE_CHECKING:
-    from ._state import InputState
 
 
 def _normalize_mouse_button(btn: object) -> MouseButton:
@@ -50,10 +49,12 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         *,
         config: Optional[MouseBindConfig] = None,
         hwnd: Optional[int] = None,
-        dispatch: Optional[Callable[[Callback], None]] = None,
+        dispatch: Optional[Callable[..., None]] = None,
+        diagnostics: Optional[_DiagnosticsManager] = None,
     ) -> None:
-        super().__init__(callback, config=config or MouseBindConfig(), hwnd=hwnd, dispatch=dispatch)
+        super().__init__(callback, config=config or MouseBindConfig(), hwnd=hwnd, dispatch=dispatch, diagnostics=diagnostics)
         self.button = _normalize_mouse_button(button)
+        self._set_diagnostics_identity(self.button.name.lower(), "mouse")
 
         self._down_ms: Optional[int] = None
         self._press_suppress_up: bool = False
@@ -61,15 +62,8 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         self._tap_last_ms: int = 0
         self._armed: bool = False
 
-    def _checks_ok(self, event: winput.MouseEvent, state: InputState) -> bool:
-        for pred in self.config.checks:
-            try:
-                if not pred(event, state):
-                    return False
-            except Exception:
-                print_exc()
-                return False
-        return True
+    def _checks_ok(self, event: winput.MouseEvent, state: InputState, trace: Optional[_EventTrace] = None) -> bool:
+        return super()._checks_ok(event, state, trace=trace)
 
     def _actions_for_button(self) -> Tuple[int, int]:
         if self.button == MouseButton.LEFT:
@@ -104,11 +98,12 @@ class MouseBind(BaseBind[winput.MouseEvent]):
     def handle(self, event: winput.MouseEvent, state: InputState) -> int:
         # Mouse move/wheel is extremely frequent; this is called only after Hook filtered.
         with self._lock:
+            trace = self._trace(event)
             now_ms = int(event.time)
 
-            if not self._window_ok():
+            if not self._window_ok(trace=trace):
                 return winput.WP_CONTINUE
-            if self.config.checks.predicates and not self._checks_ok(event, state):
+            if self.config.checks.predicates and not self._checks_ok(event, state, trace=trace):
                 return winput.WP_CONTINUE
             if not self._xbutton_match(event):
                 return winput.WP_CONTINUE
@@ -116,15 +111,17 @@ class MouseBind(BaseBind[winput.MouseEvent]):
             inj = bool(getattr(event, "injected", False))
             pol = self.config.injected
             if pol == InjectedPolicy.IGNORE and inj:
+                trace.skip("injected_ignored")
                 return winput.WP_CONTINUE
             if pol == InjectedPolicy.ONLY and not inj:
+                trace.skip("injected_only_but_physical")
                 return winput.WP_CONTINUE
 
             down_act, up_act = self._actions_for_button()
             is_down = event.action == down_act
             is_up = event.action == up_act
 
-            # Not our button event -> ignore.
+            # Not our button event -> ignore silently for diagnostics.
             if not is_down and not is_up:
                 return winput.WP_CONTINUE
 
@@ -137,71 +134,106 @@ class MouseBind(BaseBind[winput.MouseEvent]):
             if is_up:
                 self._armed = False
 
+            if was_armed and not self._armed and self.config.trigger in (Trigger.ON_HOLD, Trigger.ON_REPEAT):
+                self._hold_token += 1
+
+            trace.note(
+                "decision",
+                "candidate_state",
+                is_down=is_down,
+                is_up=is_up,
+                armed=self._armed,
+                was_armed=was_armed,
+                button=self.button.name.lower(),
+            )
+
             flags = winput.WP_CONTINUE
             sup = self.config.suppress
 
             if sup == SuppressPolicy.ALWAYS:
                 flags |= winput.WP_DONT_PASS_INPUT_ON
+                trace.suppress("suppressed_always")
 
             elif sup == SuppressPolicy.WHILE_ACTIVE:
                 if self._armed:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_while_active")
 
             elif sup == SuppressPolicy.WHILE_EVALUATING:
                 # suppress DOWN and the paired UP for this click/gesture
                 if self._armed or was_armed:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_while_evaluating")
 
             elif self.config.suppress == SuppressPolicy.WHEN_MATCHED and is_up and self._press_suppress_up:
                 flags |= winput.WP_DONT_PASS_INPUT_ON
+                trace.suppress("suppressed_when_matched")
                 self._press_suppress_up = False
 
             trig = self.config.trigger
+            trig_name = trig.name.lower()
 
-            def fire_if_allowed(ts_ms: int) -> bool:
-                if self._cooldown_ok(ts_ms) and self._max_fires_ok():
-                    self._fires += 1
-                    self._last_fire_ms = ts_ms
-                    self._fire()
-                    return True
-                return False
+            def fire_if_allowed(ts_ms: int):
+                if not self._cooldown_ok(ts_ms, trace=trace):
+                    return None
+                if not self._max_fires_ok(trace=trace):
+                    return None
+                self._fires += 1
+                self._last_fire_ms = ts_ms
+                dispatch_trace = trace.fire(trigger=trig_name)
+                self._fire(dispatch_trace)
+                return dispatch_trace
 
             if trig == Trigger.ON_PRESS and is_down:
-                if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                fired = fire_if_allowed(now_ms)
+                if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_when_matched", trigger=trig_name)
                     self._press_suppress_up = True  # button up suppress
 
             elif trig == Trigger.ON_RELEASE and is_up:
-                if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                fired = fire_if_allowed(now_ms)
+                if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                     flags |= winput.WP_DONT_PASS_INPUT_ON
+                    trace.suppress("suppressed_when_matched", trigger=trig_name)
 
             elif trig == Trigger.ON_CLICK:
                 if is_down:
                     self._down_ms = now_ms
+                    trace.note("decision", "click_started")
                 elif is_up and self._down_ms is not None:
                     dur = now_ms - self._down_ms
                     self._down_ms = None
                     if dur <= self.config.timing.hold_ms:
-                        if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                        fired = fire_if_allowed(now_ms)
+                        if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                             flags |= winput.WP_DONT_PASS_INPUT_ON
+                            trace.suppress("suppressed_when_matched", trigger=trig_name)
+                    else:
+                        trace.skip("hold_not_long_enough", duration_ms=dur, hold_ms=self.config.timing.hold_ms)
 
             elif trig == Trigger.ON_HOLD and is_down:
                 hold_ms = self.config.timing.hold_ms
 
                 self._hold_token += 1
                 token = self._hold_token
+                trace.note("decision", "hold_timer_started", hold_ms=hold_ms)
 
                 def _hold() -> None:
                     time.sleep(max(0, hold_ms) / 1000.0)
                     with self._lock:
                         if token != self._hold_token:
+                            trace.skip("hold_timer_cancelled", reason_detail="token_changed")
                             return
                         if not self._armed:
+                            trace.skip("hold_timer_cancelled", reason_detail="button_released")
                             return
-                        if not self._window_ok(force=True):
+                        if not self._window_ok(force=True, trace=trace):
+                            trace.skip("hold_timer_cancelled", reason_detail="window_mismatch")
                             return
 
                         now2 = int(time.monotonic() * 1000)
+                        trace.note("decision", "hold_timer_fired")
                         fire_if_allowed(now2)
 
                 threading.Thread(target=_hold, daemon=True).start()
@@ -212,15 +244,29 @@ class MouseBind(BaseBind[winput.MouseEvent]):
 
                 self._hold_token += 1
                 token = self._hold_token
+                trace.note(
+                    "decision",
+                    "repeat_started",
+                    repeat_delay_ms=int(delay_s * 1000),
+                    repeat_interval_ms=int(interval_s * 1000),
+                )
 
                 def _repeat() -> None:
                     time.sleep(max(0.0, delay_s))
                     while True:
                         with self._lock:
-                            if token != self._hold_token or not self._armed or not self._window_ok(force=True):
+                            if token != self._hold_token:
+                                trace.skip("repeat_cancelled", reason_detail="token_changed")
+                                break
+                            if not self._armed:
+                                trace.skip("repeat_cancelled", reason_detail="button_released")
+                                break
+                            if not self._window_ok(force=True, trace=trace):
+                                trace.skip("repeat_cancelled", reason_detail="window_mismatch")
                                 break
 
                             now2 = int(time.monotonic() * 1000)
+                            trace.note("decision", "repeat_tick")
                             fire_if_allowed(now2)
                         time.sleep(interval_s)
 
@@ -233,9 +279,12 @@ class MouseBind(BaseBind[winput.MouseEvent]):
                 else:
                     self._tap_count = 1
                 self._tap_last_ms = now_ms
+                trace.note("decision", "double_tap_progress", tap_count=self._tap_count, window_ms=win)
                 if self._tap_count >= 2:
                     self._tap_count = 0
-                    if fire_if_allowed(now_ms) and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+                    fired = fire_if_allowed(now_ms)
+                    if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                         flags |= winput.WP_DONT_PASS_INPUT_ON
+                        trace.suppress("suppressed_when_matched", trigger=trig_name)
 
             return flags

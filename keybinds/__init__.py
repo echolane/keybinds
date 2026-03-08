@@ -22,13 +22,14 @@ from .types import (
     Predicate,
 )
 
+
 from .bind import Bind, MouseBind, Hook, get_default_hook, set_default_hook, join
 from .decorators import bind_key, bind_mouse
 from . import presets
 
 from ._constants import register_key_token
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy",
