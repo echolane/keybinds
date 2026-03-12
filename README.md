@@ -360,13 +360,17 @@ Measured using `examples/benchmark.py`:
 
 Latency includes hook dispatch and callback scheduling (no heavy user code).
 
+## Suppression limitations
+
+On Windows, suppression depends on low-level hook order. See [Advanced Usage — 4.1) Hook chain limitations and `reinstall_hooks()`](Advanced%20Usage.md#41-hook-chain-limitations-and-reinstall_hooks).
+
 ## License
 
 MIT License
 
 ## Third-party Components
 
-This project bundles a modified copy of [winput](https://github.com/Zuzu-Typ/winput) (originally by Zuzu_Typ, zlib/libpng license).
+This project bundles a modified copy of [winput](https://github.com/Zuzu-Typ/winput) (originally by Zuzu_Typ, zlib/libpng license), extended so `keybinds` can detect injected keyboard and mouse hook events.
 The original license text is included in `keybinds/winput/LICENSE`.
 
 ## Contributing

@@ -10,6 +10,7 @@ If you are trying to understand why a bind fired, did not fire, or stopped at a 
 - [2) Keyboard expression grammar and token parsing](#2-keyboard-expression-grammar-and-token-parsing)
 - [3) Window-scoped binds (`hwnd`)](#3-window-scoped-binds-hwnd)
 - [4) Hook lifecycle, default hook, and multiple Hook instances](#4-hook-lifecycle-default-hook-and-multiple-hook-instances)
+- [4.1) Hook chain limitations and `reinstall_hooks()`](#41-hook-chain-limitations-and-reinstall_hooks)
 - [5) Callback execution model (workers + async)](#5-callback-execution-model-workers--async)
 - [6) Advanced constraints and timing](#6-advanced-constraints-and-timing)
 - [7) Policy reference (suppress / injected / chord / order)](#7-policy-reference-suppress--injected--chord--order)
@@ -298,6 +299,26 @@ This is useful for:
 * plugin/module isolation
 * temporary feature groups
 * independent pause/unpause domains
+
+---
+
+## 4.1) Hook chain limitations and `reinstall_hooks()`
+
+`keybinds` uses Windows low-level hooks. Suppression (`WHEN_MATCHED`, `ALWAYS`, etc.) only guarantees blocking for applications and for hook listeners that are **after** `keybinds` in the hook chain.
+
+If another low-level listener is started **after** `keybinds`, that listener may still receive the event before `keybinds` suppresses it.
+
+In that case, reinstall the hooks:
+
+```python
+import keybinds
+
+keybinds.reinstall_hooks()
+# OR:
+keybinds.rehook()
+```
+
+This is useful after starting third-party listeners such as other hotkey or keyboard-hook libraries.
 
 ---
 

@@ -410,7 +410,7 @@ hook.bind(
     upload_file,
     config=BindConfig(
         checks=[
-            named_check("can_upload", lambda e, s: state.can_upload),
+            named_check("can_upload", lambda event, state: can_upload(event, state)),
         ]
     ),
 )

@@ -18,7 +18,6 @@ from ._base_bind import BaseBind
 from ._state import InputState
 
 
-
 def _normalize_mouse_button(btn: object) -> MouseButton:
     if isinstance(btn, MouseButton):
         return btn
@@ -174,9 +173,7 @@ class MouseBind(BaseBind[winput.MouseEvent]):
             trig_name = trig.name.lower()
 
             def fire_if_allowed(ts_ms: int):
-                if not self._cooldown_ok(ts_ms, trace=trace):
-                    return None
-                if not self._max_fires_ok(trace=trace):
+                if not self.can_fire_now(ts_ms, trace=trace):
                     return None
                 self._fires += 1
                 self._last_fire_ms = ts_ms
@@ -191,11 +188,18 @@ class MouseBind(BaseBind[winput.MouseEvent]):
                     trace.suppress("suppressed_when_matched", trigger=trig_name)
                     self._press_suppress_up = True  # button up suppress
 
-            elif trig == Trigger.ON_RELEASE and is_up:
-                fired = fire_if_allowed(now_ms)
-                if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
+            elif trig == Trigger.ON_RELEASE:
+                if (
+                    is_down
+                    and self.config.suppress == SuppressPolicy.WHEN_MATCHED
+                    and self.can_fire_now(now_ms)
+                ):
                     flags |= winput.WP_DONT_PASS_INPUT_ON
                     trace.suppress("suppressed_when_matched", trigger=trig_name)
+                    self._press_suppress_up = True
+
+                if is_up:
+                    fire_if_allowed(now_ms)
 
             elif trig == Trigger.ON_CLICK:
                 if is_down:
@@ -205,10 +209,7 @@ class MouseBind(BaseBind[winput.MouseEvent]):
                     dur = now_ms - self._down_ms
                     self._down_ms = None
                     if dur <= self.config.timing.hold_ms:
-                        fired = fire_if_allowed(now_ms)
-                        if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
-                            flags |= winput.WP_DONT_PASS_INPUT_ON
-                            trace.suppress("suppressed_when_matched", trigger=trig_name)
+                        fire_if_allowed(now_ms)
                     else:
                         trace.skip("hold_not_long_enough", duration_ms=dur, hold_ms=self.config.timing.hold_ms)
 
@@ -286,5 +287,6 @@ class MouseBind(BaseBind[winput.MouseEvent]):
                     if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:
                         flags |= winput.WP_DONT_PASS_INPUT_ON
                         trace.suppress("suppressed_when_matched", trigger=trig_name)
+                        self._press_suppress_up = True
 
             return flags

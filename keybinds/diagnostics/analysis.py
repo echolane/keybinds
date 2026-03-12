@@ -733,7 +733,7 @@ def _trigger_lines(decision: BindDecision) -> List[str]:
     elif trigger == 'on_hold':
         hold_ms = d.get('hold_ms') or (decision.metadata.hold_ms if decision.metadata is not None else None)
         if hold_ms is not None:
-            out.append(f"required hold time: {hold_ms} ms")
+            out.append(f"Required hold time: {hold_ms} ms")
         out.append(f"hold timer started: {bool(d.get('hold_timer_started'))}")
         if d.get('hold_cancel_reason'):
             out.append(f"hold cancel reason: {d['hold_cancel_reason']}")
