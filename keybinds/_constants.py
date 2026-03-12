@@ -211,4 +211,5 @@ def register_key_token(name: str, vk: int) -> None:
     Example:
         register_key_token("`", 0xC0)
     """
-    SPECIAL_KEYS[name.lower()] = vk
+    from ._parsing import _normalize_token
+    SPECIAL_KEYS[_normalize_token(name)] = vk

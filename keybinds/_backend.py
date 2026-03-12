@@ -18,6 +18,8 @@ from ._constants import (
 from .types import MouseButton
 from ._state import InputState
 
+WM_KEYBINDS_REINSTALL = winput.WM_APP + 1
+
 
 class _GlobalBackend:
     """
@@ -48,6 +50,9 @@ class _GlobalBackend:
         # injected only
         self._pressed_keys_injected: Set[int] = set()
         self._pressed_mouse_injected: Set[MouseButton] = set()
+
+        self._thread_id: Optional[int] = None
+        self._thread_ready = threading.Event()
 
     @classmethod
     def instance(cls) -> _GlobalBackend:
@@ -88,24 +93,47 @@ class _GlobalBackend:
                 new_list.append(r)
             self._hooks = new_list
 
+    def reinstall_hooks(self) -> None:
+        if not self._thread_started:
+            self._ensure_thread()
+
+        if not self._thread_ready.wait(timeout=1.0):
+            raise TimeoutError("keybinds backend thread did not become ready in time")
+
+        thread_id = self._thread_id
+        if thread_id is None:
+            raise RuntimeError("keybinds backend thread is ready but has no thread id")
+
+        winput.post_thread_message(thread_id, WM_KEYBINDS_REINSTALL, 0, 0)
+
+    def _reset_all_hook_runtime_states(self) -> None:
+        for hook in self._alive_hooks():
+            try:
+                hook._reset_runtime_states()
+            except Exception:
+                pass
+
+    def _clear_pressed_state(self) -> None:
+        self._pressed_keys.clear()
+        self._pressed_mouse.clear()
+        self._pressed_keys_all.clear()
+        self._pressed_mouse_all.clear()
+        self._pressed_keys_injected.clear()
+        self._pressed_mouse_injected.clear()
+
     def _ensure_thread(self) -> None:
         with self._hooks_lock:
             if self._thread_started:
                 return
             self._thread_started = True
 
+        self._thread_ready.clear()
         t = threading.Thread(target=self._thread_main, name="keybinds-backend", daemon=True)
         self._thread = t
         t.start()
 
-    def _thread_main(self) -> None:
-        # Install hooks and pump messages on the SAME thread.
-        try:
-            winput.hook_keyboard(self._on_keyboard)
-            winput.hook_mouse(self._on_mouse)
-            winput.wait_messages()
-        except Exception:
-            # If something goes wrong, try to unhook to restore input.
+    def _on_backend_message(self, msg) -> bool:
+        if int(msg.message) == WM_KEYBINDS_REINSTALL:
             try:
                 winput.unhook_keyboard()
             except Exception:
@@ -114,6 +142,45 @@ class _GlobalBackend:
                 winput.unhook_mouse()
             except Exception:
                 pass
+
+            self._clear_pressed_state()
+            self._reset_all_hook_runtime_states()
+
+            winput.hook_keyboard(self._on_keyboard)
+            winput.hook_mouse(self._on_mouse)
+            return True
+
+        return False
+
+    def _thread_main(self) -> None:
+        self._thread_id = winput.get_current_thread_id()
+
+        # Force-create the thread message queue before anyone posts thread messages.
+        winput.ensure_message_queue()
+        self._thread_ready.set()
+
+        try:
+            winput.hook_keyboard(self._on_keyboard)
+            winput.hook_mouse(self._on_mouse)
+            winput.wait_messages(self._on_backend_message)
+        except Exception:
+            print_exc()
+        finally:
+            try:
+                winput.unhook_keyboard()
+            except Exception:
+                pass
+            try:
+                winput.unhook_mouse()
+            except Exception:
+                pass
+
+            self._clear_pressed_state()
+            with self._hooks_lock:
+                self._thread_started = False
+                self._thread = None
+                self._thread_id = None
+                self._thread_ready.clear()
 
     # -------------------------
     # dispatch
@@ -241,6 +308,16 @@ class _GlobalBackend:
             try:
                 flags |= h._handle_mouse_event(event, state)
             except Exception:
-                pass
+                print_exc()
         return flags
 
+
+def reinstall_hooks() -> None:
+    """
+    Reinstall global keyboard/mouse hooks so keybinds is placed later
+    in the Windows low-level hook chain.
+    """
+    _GlobalBackend.instance().reinstall_hooks()
+
+
+rehook = reinstall_hooks

@@ -154,5 +154,12 @@ class BaseBind(Generic[E]):
             trace.skip("max_fires_reached", max_fires=mx, fires=self._fires)
         return ok
 
+    def can_fire_now(self, ts_ms: int, trace: Optional[_EventTrace] = None) -> bool:
+        if not self._cooldown_ok(ts_ms, trace=trace):
+            return False
+        if not self._max_fires_ok(trace=trace):
+            return False
+        return True
+
     def _fire(self, trace: Optional[_DispatchTrace] = None) -> None:
         self._dispatch(self.callback, trace)

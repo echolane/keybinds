@@ -27,14 +27,17 @@ from .bind import Bind, MouseBind, Hook, get_default_hook, set_default_hook, joi
 from .decorators import bind_key, bind_mouse
 from . import presets
 
+from ._backend import reinstall_hooks, rehook
+
 from ._constants import register_key_token
 
-__version__ = "1.1.3"
+__version__ = "1.2.1"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy",
     "Timing","Constraints","Checks","BindConfig",
     "MouseButton","MouseBindConfig","Callback","Predicate",
     "Bind","MouseBind","Hook","get_default_hook","set_default_hook","join",
-    "bind_key","bind_mouse","presets","register_key_token","winput"
+    "bind_key","bind_mouse","presets","register_key_token","winput",
+    "reinstall_hooks","rehook"
 ]

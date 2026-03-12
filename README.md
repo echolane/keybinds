@@ -37,21 +37,21 @@ pip install keybinds
 
 ---
 
-## Comparison (Windows hotkeys)
+## When to use keybinds
 
-| Feature | keybinds | keyboard | pynput | AutoHotkey |
-|---|---:|---:|---:|---:|
-| Cross-platform | ❌ (Windows only) | ⚠️ Windows/Linux (+ experimental macOS) | ✅ | ❌ (Windows only) |
-| Python-native library | ✅ | ✅ | ✅ | ❌ (separate DSL/tool) |
-| Global keyboard hooks | ✅ | ✅ | ✅ | ✅ |
-| Chords / combos | ✅ | ✅ | ✅* | ✅ |
-| Sequences | ✅ | ✅ | ❌ | ✅ |
-| Window-scoped/context hotkeys | ✅ (`hwnd`) | ❌ | ❌ | ✅ |
-| Async callbacks (`asyncio`) | ✅ | ❌ | ❌ | ❌ |
-| Built-in trigger model (hold/repeat/double-tap/sequence/chord lifecycle) | ✅ | ⚠️ partial | ❌ | ⚠️ script-level patterns |
-| Fine-grained constraints (strict chords, order policy, injected policy) | ✅ | ❌ | ❌ | ⚠️ possible, but not as a Python API model |
+**keybinds** is for Windows applications that need more than basic hotkeys.
 
-\* `pynput` provides `HotKey` / `GlobalHotKeys` for combinations, but not built-in sequence-style hotkeys.
+Use it when your app needs:
+
+- global keyboard and mouse binds
+- strict chords and key sequences
+- advanced trigger behavior such as hold, repeat, and double tap
+- suppression control and injected-input filtering
+- a binding model that scales from simple shortcuts to more complex setups
+- configuration-driven binds, presets, and async callbacks
+
+If you only need a few simple shortcuts, a smaller hotkey library may be enough.
+If you need raw event streams instead of bind matching, a lower-level input library may be a better fit.
 
 ---
 
@@ -361,13 +361,17 @@ Measured using `examples/benchmark.py`:
 
 Latency includes hook dispatch and callback scheduling (no heavy user code).
 
+## Suppression limitations
+
+On Windows, suppression depends on low-level hook order. See [Advanced Usage — 4.1) Hook chain limitations and `reinstall_hooks()`](Advanced%20Usage.md#41-hook-chain-limitations-and-reinstall_hooks).
+
 ## License
 
 MIT License
 
 ## Third-party Components
 
-This project bundles a modified copy of [winput](https://github.com/Zuzu-Typ/winput) (originally by Zuzu_Typ, zlib/libpng license).
+This project bundles a modified copy of [winput](https://github.com/Zuzu-Typ/winput) (originally by Zuzu_Typ, zlib/libpng license), extended so `keybinds` can detect injected keyboard and mouse hook events.
 The original license text is included in `keybinds/winput/LICENSE`.
 
 ## Contributing

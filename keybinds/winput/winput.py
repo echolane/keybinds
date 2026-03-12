@@ -279,6 +279,25 @@ user32.GetMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, wint
 user32.PostQuitMessage.restype = None
 user32.PostQuitMessage.argtypes = (ctypes.c_int,)
 
+WM_QUIT = 0x0012
+WM_APP = 0x8000
+
+user32.PostThreadMessageW.restype = wintypes.BOOL
+user32.PostThreadMessageW.argtypes = (wintypes.DWORD, wintypes.UINT, WPARAM, LPARAM)
+
+user32.PeekMessageW.restype = wintypes.BOOL
+user32.PeekMessageW.argtypes = (
+    ctypes.POINTER(wintypes.MSG),
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.UINT,
+    wintypes.UINT,
+)
+
+kernel32 = ctypes.windll.kernel32
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+kernel32.GetCurrentThreadId.argtypes = ()
+
 
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long),
@@ -504,11 +523,19 @@ def hook_keyboard(func : Callable[[KeyboardEvent], Optional[int]]) -> None: # ho
     global keyboard_hook_func, keyboard_hook
     keyboard_hook_func = LLKeyboardProc(lambda x, y, z: _LowLevelKeyboardProc(x, y, z, func))
     keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_hook_func, None, 0)
-    
-def wait_messages() -> None: # enter message loop
+
+def wait_messages(on_message = None) -> None:  # enter message loop
     msg = wintypes.MSG()
-    while user32.GetMessageW(ctypes.pointer(msg), None, 0, 0):
-        pass
+    while True:
+        ret = user32.GetMessageW(ctypes.pointer(msg), None, 0, 0)
+        if ret == -1:
+            raise ctypes.WinError(ctypes.get_last_error())
+        if ret == 0:  # WM_QUIT
+            break
+
+        if on_message is not None:
+            if on_message(msg):
+                continue
 
 def get_message() -> bool: # get pending messages
     msg = wintypes.MSG()
@@ -553,5 +580,15 @@ def get_window_scaling_factor(hwnd : int) -> float: # gets the DPI scaling facto
             user32.ReleaseDC(hwnd, hdc)
 
     return 1.0
-        
-        
+
+def get_current_thread_id() -> int:
+    return int(kernel32.GetCurrentThreadId())
+
+def post_thread_message(thread_id: int, message: int, wparam: int = 0, lparam: int = 0) -> None:
+    ok = user32.PostThreadMessageW(int(thread_id), int(message), int(wparam), int(lparam))
+    if not ok:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+def ensure_message_queue() -> None:
+    msg = wintypes.MSG()
+    user32.PeekMessageW(ctypes.pointer(msg), None, 0, 0, 0)
