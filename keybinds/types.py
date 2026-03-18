@@ -62,6 +62,36 @@ class FocusPolicy(Enum):
     PAUSE_ON_BLUR = auto()
 
 
+class TextBoundaryPolicy(Enum):
+    """How text-based logical matchers treat word boundaries."""
+    ANYWHERE = auto()
+    WORD_START = auto()
+    WORD_END = auto()
+    WHOLE_WORD = auto()
+
+
+class TextBackspacePolicy(Enum):
+    """How text-based logical matchers react to Backspace."""
+    EDIT_BUFFER = auto()
+    IGNORE = auto()
+    CLEAR_BUFFER = auto()
+    CLEAR_WORD = auto()
+
+
+class OsKeyRepeatPolicy(Enum):
+    """How logical matchers react to OS auto-repeat keydown events."""
+    IGNORE = auto()
+    MATCH = auto()
+    RESET = auto()
+
+
+class ReplacementPolicy(Enum):
+    """How text replacements should be applied when a text matcher fires."""
+    REPLACE_ALL = auto()
+    APPEND_SUFFIX = auto()
+    MINIMAL_DIFF = auto()
+
+
 @dataclass(frozen=True)
 class Timing:
     chord_timeout_ms: int = 350
@@ -81,6 +111,28 @@ class Constraints:
     allow_os_key_repeat: bool = False
     max_fires: Optional[int] = None
     ignore_keys: Set[int] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class LogicalConfig:
+    """Extra matching configuration for logical keyboard binds and text abbreviations."""
+
+    case_sensitive: bool = True
+    respect_caps_lock: bool = True
+
+    ignore_modifier_keys: bool = True
+    ignore_toggle_keys: bool = True
+
+    text_ignore_ctrl_combos: bool = True
+    text_ignore_alt_combos: bool = True
+    text_ignore_win_combos: bool = True
+    text_backspace_policy: TextBackspacePolicy = TextBackspacePolicy.EDIT_BUFFER
+    # Legacy compatibility shim. If explicitly set, overrides text_backspace_policy.
+    text_backspace_edits_buffer: Optional[bool] = None
+    text_clear_buffer_on_non_text: bool = False
+    text_boundary_policy: TextBoundaryPolicy = TextBoundaryPolicy.ANYWHERE
+    os_key_repeat_policy: OsKeyRepeatPolicy = OsKeyRepeatPolicy.MATCH
+    replacement_policy: ReplacementPolicy = ReplacementPolicy.MINIMAL_DIFF
 
 
 @dataclass(frozen=True)
@@ -115,7 +167,6 @@ class BindConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "checks", Checks.coerce(self.checks))
-
 
     # ---- API: merges -------------------------------------------------
 
@@ -167,7 +218,6 @@ class MouseBindConfig:
     def __post_init__(self):
         object.__setattr__(self, "checks", Checks.coerce(self.checks))
 
-
     def soft_merge(self, patch: MouseBindConfig) -> MouseBindConfig:
         """Apply only non-default fields from `patch` (patch semantics)."""
         if not isinstance(patch, MouseBindConfig):
@@ -201,6 +251,7 @@ _DEFAULT_BIND = BindConfig()
 _DEFAULT_MOUSE = MouseBindConfig()
 _DEFAULT_TIMING = Timing()
 _DEFAULT_CONSTRAINTS = Constraints()
+_DEFAULT_LOGICAL = LogicalConfig()
 _DEFAULT_CHECKS = Checks()
 
 

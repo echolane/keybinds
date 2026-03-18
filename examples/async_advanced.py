@@ -8,8 +8,8 @@ loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
 # `asyncio_loop` is optional:
-# – If keybinds is the only loop, just use keybinds.join() (no Hook needed).
-# – If an external loop exists, pass it to Hook(...) and don't call join() since it blocks.
+# - If keybinds is the only loop, just use keybinds.join() (no Hook needed).
+# - If an external loop exists, pass it to Hook(...) and don't call join() since it blocks.
 hook = Hook(asyncio_loop=loop)
 
 enabled = True

@@ -42,7 +42,7 @@ hook.bind("d", lambda: hit("d double tap"), config=double_tap(300))
 # Sequence
 hook.bind("g,k,i", lambda: hit("sequence g,k,i"), config=sequence(600))
 
-# “Partial override”: tweak a preset
+# "Partial override": tweak a preset
 FAST_REPEAT_SUPPRESSED = repeat(delay_ms=180, interval_ms=60) + BindConfig(suppress=SuppressPolicy.WHILE_ACTIVE)
 hook.bind("space", lambda: hit("space fast repeat (while-active suppressed)"), config=FAST_REPEAT_SUPPRESSED)
 

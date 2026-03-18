@@ -2,19 +2,27 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import Callable, Optional, Union, Generator, List, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Optional, Union, Generator, List, Tuple, Dict, TYPE_CHECKING
 
 from ._backend import _GlobalBackend
 from ._dispatcher import _CallbackDispatcher
 from ._keyboard import Bind
+from .logical.keyboard import LogicalBind
+from .logical.abbreviation import TextAbbreviationBind
 from ._mouse import MouseBind, _normalize_mouse_button
-from .types import BindConfig, MouseBindConfig, MouseButton, Callback
+from .types import BindConfig, MouseBindConfig, MouseButton, Callback, InjectedPolicy, LogicalConfig, ReplacementPolicy
 from .diagnostics import DiagnosticRecord, DiagnosticsConfig, create_diagnostics_manager
+from ._bind_registry import (
+    register_bind, unregister_bind, owner_func_for_bind, remove_binds_from_func,
+    get_func_binds, hook_for_bind, kind_for_bind,
+)
 
 if TYPE_CHECKING:
     import asyncio
     from .diagnostics.core import ExplainSelect
     from .diagnostics.reporting import InputAttempt, ExplainReport
+
+KeyboardBind = Union[Bind, LogicalBind, TextAbbreviationBind]
 
 _default_hook: Optional[Hook] = None
 
@@ -29,6 +37,24 @@ def get_default_hook() -> Hook:
 def set_default_hook(hook: Hook) -> None:
     global _default_hook
     _default_hook = hook
+
+
+def _compute_text_replacement_edit(source: str, target: str, policy: ReplacementPolicy) -> Tuple[int, str]:
+    if policy == ReplacementPolicy.REPLACE_ALL:
+        return len(source), target
+    if policy == ReplacementPolicy.APPEND_SUFFIX:
+        if target.startswith(source):
+            return 0, target[len(source):]
+        return len(source), target
+
+    # MINIMAL_DIFF: with a caret at the end we can preserve the longest common
+    # prefix, backspace the differing suffix of the typed source, then type the
+    # remaining suffix of the target.
+    prefix_len = 0
+    max_prefix = min(len(source), len(target))
+    while prefix_len < max_prefix and source[prefix_len] == target[prefix_len]:
+        prefix_len += 1
+    return len(source) - prefix_len, target[prefix_len:]
 
 
 def join(hook: Optional[Hook] = None) -> None:
@@ -46,6 +72,53 @@ def join(hook: Optional[Hook] = None) -> None:
         hook.close()
 
 
+def _is_bind_instance(obj: Any) -> bool:
+    return isinstance(obj, (Bind, LogicalBind, TextAbbreviationBind, MouseBind))
+
+
+def _iter_bind_targets(target: Any):
+    if target is None:
+        return
+    if _is_bind_instance(target):
+        yield target
+        return
+    if callable(target) and (hasattr(target, "binds") or hasattr(target, "bind")):
+        for bind in get_func_binds(target):
+            yield bind
+        return
+    if isinstance(target, (list, tuple, set, frozenset)):
+        for item in target:
+            for bind in _iter_bind_targets(item):
+                yield bind
+
+
+def _bind_belongs_to_hook(bind: Any, hook: "Hook") -> bool:
+    owner = getattr(bind, "hook", None)
+    if owner is None:
+        owner = hook_for_bind(bind)
+    return owner is None or owner is hook
+
+
+def unbind(target: Any, *, hook: Optional["Hook"] = None) -> None:
+    binds = list(_iter_bind_targets(target))
+    if hook is not None:
+        hook.unbind(target)
+        return
+    if not binds:
+        get_default_hook().unbind(target)
+        return
+
+    grouped: Dict[Hook, List[Any]] = {}
+    for bind in binds:
+        owner = hook_for_bind(bind)
+        if owner is None:
+            owner = get_default_hook()
+        grouped.setdefault(owner, []).append(bind)
+
+    for owner_hook, owner_binds in grouped.items():
+        owner_hook.unbind(owner_binds)
+
+
 class Hook:
     def __init__(
         self,
@@ -53,6 +126,7 @@ class Hook:
         callback_workers: int = 1,
         default_config: Optional[BindConfig] = None,
         default_mouse_config: Optional[MouseBindConfig] = None,
+        default_logical_config: Optional[LogicalConfig] = None,
         asyncio_loop: "Optional[asyncio.AbstractEventLoop]" = None,
         on_async_error: Optional[Callable[[BaseException], None]] = None,
         auto_start: bool = True,
@@ -67,6 +141,7 @@ class Hook:
 
         self.default_config = default_config
         self.default_mouse_config = default_mouse_config
+        self.default_logical_config = default_logical_config
 
         self._diagnostics = create_diagnostics_manager(diagnostics)
         self._dispatcher = _CallbackDispatcher(
@@ -76,11 +151,11 @@ class Hook:
         )
 
         # binds live in this frontend
-        self._keyboard_binds: List[Bind] = []
+        self._keyboard_binds: List[KeyboardBind] = []
         self._mouse_binds: List[MouseBind] = []
 
         # snapshots used by backend hot path
-        self._keyboard_snapshot: Tuple[Bind, ...] = ()
+        self._keyboard_snapshot: Tuple[KeyboardBind, ...] = ()
         self._mouse_snapshot: Tuple[MouseBind, ...] = ()
 
         if auto_start:
@@ -115,6 +190,89 @@ class Hook:
             dispatch=self._dispatcher.submit,
             diagnostics=self._diagnostics,
         )
+        register_bind(b, self, "keyboard")
+        with self._lock:
+            self._keyboard_binds.append(b)
+            self._keyboard_snapshot = tuple(self._keyboard_binds)
+        return b
+
+    def bind_logical(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd=None) -> LogicalBind:
+        cfg = config or self.default_config or BindConfig()
+        lcfg = logical_config or self.default_logical_config or LogicalConfig()
+        b = LogicalBind(
+            expr,
+            callback,
+            config=cfg,
+            hwnd=hwnd,
+            dispatch=self._dispatcher.submit,
+            diagnostics=self._diagnostics,
+            logical_config=lcfg,
+        )
+        register_bind(b, self, "logical")
+        with self._lock:
+            self._keyboard_binds.append(b)
+            self._keyboard_snapshot = tuple(self._keyboard_binds)
+        return b
+
+    def bind_text(self, text: str, callback: Callback, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd=None) -> TextAbbreviationBind:
+        cfg = config or self.default_config or BindConfig()
+        lcfg = logical_config or self.default_logical_config or LogicalConfig()
+        b = TextAbbreviationBind(
+            text,
+            callback,
+            config=cfg,
+            hwnd=hwnd,
+            dispatch=self._dispatcher.submit,
+            diagnostics=self._diagnostics,
+            logical_config=lcfg,
+        )
+        register_bind(b, self, "text")
+        with self._lock:
+            self._keyboard_binds.append(b)
+            self._keyboard_snapshot = tuple(self._keyboard_binds)
+        return b
+
+    def add_abbreviation(self, typed: str, replacement: str, callback: Optional[Callback] = None, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd=None) -> TextAbbreviationBind:
+        from .logical.translate import send_backspaces, send_unicode_text
+        base_cfg = (self.default_config or BindConfig()).soft_merge(BindConfig(injected=InjectedPolicy.IGNORE))
+        cfg = base_cfg.hard_merge(config) if config is not None else base_cfg
+        lcfg = logical_config or self.default_logical_config or LogicalConfig()
+
+        def _noop() -> None:
+            return None
+
+        b = TextAbbreviationBind(
+            typed,
+            _noop,
+            config=cfg,
+            hwnd=hwnd,
+            dispatch=self._dispatcher.submit,
+            diagnostics=self._diagnostics,
+            logical_config=lcfg,
+        )
+
+        def _expand(bound_bind: TextAbbreviationBind = b) -> None:
+            match = bound_bind.consume_match()
+            trailing_text = getattr(match, "trailing_text", "") if match is not None else ""
+            matched_text = getattr(match, "matched_text", "") if match is not None else ""
+            if not matched_text:
+                matched_text = typed
+            source_text = matched_text + trailing_text
+            target_text = replacement + trailing_text
+            delete_count, insert_text = _compute_text_replacement_edit(
+                source_text,
+                target_text,
+                lcfg.replacement_policy,
+            )
+            with self.paused():
+                send_backspaces(delete_count)
+                if insert_text:
+                    send_unicode_text(insert_text)
+            if callback is not None:
+                self._dispatcher.submit(callback)
+
+        b.callback = _expand
+        register_bind(b, self, "abbreviation")
         with self._lock:
             self._keyboard_binds.append(b)
             self._keyboard_snapshot = tuple(self._keyboard_binds)
@@ -130,26 +288,78 @@ class Hook:
             dispatch=self._dispatcher.submit,
             diagnostics=self._diagnostics,
         )
+        register_bind(b, self, "mouse")
         with self._lock:
             self._mouse_binds.append(b)
             self._mouse_snapshot = tuple(self._mouse_binds)
         return b
 
-    def unbind(self, b: Bind) -> None:
-        with self._lock:
-            try:
-                self._keyboard_binds.remove(b)
-            except ValueError:
-                return
-            self._keyboard_snapshot = tuple(self._keyboard_binds)
+    def _unbind_single(self, bind: Any) -> bool:
+        removed = False
+        owner_func = owner_func_for_bind(bind)
 
-    def unbind_mouse(self, b: MouseBind) -> None:
-        with self._lock:
-            try:
-                self._mouse_binds.remove(b)
-            except ValueError:
-                return
-            self._mouse_snapshot = tuple(self._mouse_binds)
+        if isinstance(bind, MouseBind):
+            with self._lock:
+                try:
+                    self._mouse_binds.remove(bind)
+                except ValueError:
+                    return False
+                self._mouse_snapshot = tuple(self._mouse_binds)
+                removed = True
+        elif isinstance(bind, (Bind, LogicalBind, TextAbbreviationBind)):
+            with self._lock:
+                try:
+                    self._keyboard_binds.remove(bind)
+                except ValueError:
+                    return False
+                self._keyboard_snapshot = tuple(self._keyboard_binds)
+                removed = True
+        else:
+            return False
+
+        if removed:
+            if owner_func is not None:
+                remove_binds_from_func(owner_func, [bind])
+            unregister_bind(bind)
+        return removed
+
+    def unbind(self, target: Any) -> None:
+        binds = list(_iter_bind_targets(target))
+        if not binds:
+            if _is_bind_instance(target) and _bind_belongs_to_hook(target, self):
+                self._unbind_single(target)
+            return
+        for bind in binds:
+            if _bind_belongs_to_hook(bind, self):
+                self._unbind_single(bind)
+
+    def unbind_mouse(self, target: Any) -> None:
+        binds = [b for b in _iter_bind_targets(target) if isinstance(b, MouseBind)]
+        if not binds:
+            if isinstance(target, MouseBind) and _bind_belongs_to_hook(target, self):
+                self._unbind_single(target)
+            return
+        for bind in binds:
+            if _bind_belongs_to_hook(bind, self):
+                self._unbind_single(bind)
+
+    def binds_for(self, func: Callback) -> List[Any]:
+        return list(get_func_binds(func))
+
+    def clear_keyboard_binds(self) -> None:
+        self.unbind(list(self._keyboard_snapshot))
+
+    def clear_mouse_binds(self) -> None:
+        self.unbind_mouse(list(self._mouse_snapshot))
+
+    def clear_logical_binds(self) -> None:
+        self.unbind([b for b in self._keyboard_snapshot if kind_for_bind(b) == "logical"])
+
+    def clear_text_binds(self) -> None:
+        self.unbind([b for b in self._keyboard_snapshot if kind_for_bind(b) == "text"])
+
+    def clear_abbreviations(self) -> None:
+        self.unbind([b for b in self._keyboard_snapshot if kind_for_bind(b) == "abbreviation"])
 
     def _reset_runtime_states(self) -> None:
         for b in self._keyboard_snapshot:

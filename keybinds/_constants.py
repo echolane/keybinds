@@ -16,6 +16,10 @@ VK_LMENU = getattr(winput, "VK_LMENU", 0xA4)
 VK_RMENU = getattr(winput, "VK_RMENU", 0xA5)
 VK_LWIN = getattr(winput, "VK_LWIN", 0x5B)
 VK_RWIN = getattr(winput, "VK_RWIN", 0x5C)
+VK_CAPITAL = getattr(winput, "VK_CAPITAL", 0x14)
+VK_NUMLOCK = getattr(winput, "VK_NUMLOCK", 0x90)
+VK_SCROLL = getattr(winput, "VK_SCROLL", 0x91)
+VK_BACK = getattr(winput, "VK_BACK", 0x08)
 
 # Mouse wParams
 WM_LBUTTONDOWN = winput.WM_LBUTTONDOWN
@@ -36,6 +40,10 @@ WM_SYSKEYUP = winput.WM_SYSKEYUP
 WM_MOUSEMOVE = getattr(winput, "WM_MOUSEMOVE", 0x0200)
 WM_MOUSEWHEEL = getattr(winput, "WM_MOUSEWHEEL", 0x020A)
 WM_MOUSEHWHEEL = getattr(winput, "WM_MOUSEHWHEEL", 0x020E)
+
+KEYEVENTF_KEYUP = getattr(winput, "KEYEVENTF_KEYUP", 0x0002)
+KEYEVENTF_UNICODE = getattr(winput, "KEYEVENTF_UNICODE", 0x0004)
+MAPVK_VK_TO_VSC = getattr(winput, "MAPVK_VK_TO_VSC", 0)
 
 
 _MOD_GROUPS: Dict[str, Set[int]] = {

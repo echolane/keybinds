@@ -1,7 +1,7 @@
 import threading
 import time
 
-from typing import Union, Optional, Callable, TypeVar, Generic
+from typing import Union, Optional, Callable, TypeVar, Generic, TYPE_CHECKING
 
 from . import winput
 
@@ -9,6 +9,10 @@ from ._state import InputState
 from ._window import get_window
 from .types import Callback, FocusPolicy, BindConfig, MouseBindConfig
 from .diagnostics import _NULL_BOUND_DIAGNOSTICS, build_bind_metadata, _BoundDiagnostics, _DiagnosticsManager, _DispatchTrace, _EventTrace
+
+if TYPE_CHECKING:
+    from ._hook import Hook
+
 
 E = TypeVar("E", winput.KeyboardEvent, winput.MouseEvent)
 
@@ -40,6 +44,7 @@ class BaseBind(Generic[E]):
         self._fires: int = 0
 
         self._lock = threading.RLock()
+        self.hook: Optional["Hook"] = None
 
     @staticmethod
     def _dispatch_inline(fn: Callback, trace: Optional[_DispatchTrace] = None) -> None:

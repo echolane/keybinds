@@ -9,28 +9,14 @@ from .types import (
     BindConfig,
     SuppressPolicy,
     Trigger,
+    LogicalConfig,
 )
-from .bind import get_default_hook, Hook, Bind, MouseBind
+from .bind import get_default_hook, Hook, Bind, LogicalBind, TextAbbreviationBind, MouseBind
+from ._bind_registry import add_binds_to_func as _registry_add_binds_to_func
 
 
-def _add_binds_to_func(binds: List[Union[Bind, MouseBind]], func: Callback) -> None:
-    new_bind = binds[0] if len(binds) == 1 else binds
-
-    if not hasattr(func, "bind"):
-        setattr(func, "bind", new_bind)
-        return
-
-    existing = getattr(func, "bind")
-
-    if not isinstance(existing, list):
-        existing = [existing]
-
-    if isinstance(new_bind, list):
-        existing.extend(new_bind)
-    else:
-        existing.append(new_bind)
-
-    setattr(func, "bind", existing)
+def _add_binds_to_func(binds: List[Union[Bind, LogicalBind, TextAbbreviationBind, MouseBind]], func: Callback) -> None:
+    _registry_add_binds_to_func(func, binds)
 
 
 def bind_key(
@@ -40,7 +26,7 @@ def bind_key(
     trigger_on_release: bool = False,
     suppress: bool = False,
     config: Optional[BindConfig] = None,
-    hook: Optional[Hook] = None
+    hook: Optional[Hook] = None,
 ) -> Callable[[Callback], Callback]:
     def decorator(func: Callback) -> Callback:
         nonlocal keys, config, hook
@@ -61,6 +47,128 @@ def bind_key(
 
         _add_binds_to_func(binds, func)
         return func
+
+    return decorator
+
+
+def bind_logical(
+    exprs: Union[str, List[str]],
+    *,
+    hwnd: Optional[int] = None,
+    config: Optional[BindConfig] = None,
+    logical_config: Optional[LogicalConfig] = None,
+    hook: Optional[Hook] = None,
+) -> Callable[[Callback], Callback]:
+    def decorator(func: Callback) -> Callback:
+        nonlocal exprs, hook
+        items = exprs if isinstance(exprs, list) else [exprs]
+
+        if hook is None:
+            hook = get_default_hook()
+
+        binds = []
+        for expr in items:
+            b = hook.bind_logical(
+                expr,
+                func,
+                config=config,
+                logical_config=logical_config,
+                hwnd=hwnd,
+            )
+            binds.append(b)
+
+        _add_binds_to_func(binds, func)
+        return func
+
+    return decorator
+
+
+def bind_text(
+    texts: Union[str, List[str]],
+    *,
+    hwnd: Optional[int] = None,
+    config: Optional[BindConfig] = None,
+    logical_config: Optional[LogicalConfig] = None,
+    hook: Optional[Hook] = None,
+) -> Callable[[Callback], Callback]:
+    def decorator(func: Callback) -> Callback:
+        nonlocal texts, hook
+        items = texts if isinstance(texts, list) else [texts]
+
+        if hook is None:
+            hook = get_default_hook()
+
+        binds = []
+        for text in items:
+            b = hook.bind_text(
+                text,
+                func,
+                config=config,
+                logical_config=logical_config,
+                hwnd=hwnd,
+            )
+            binds.append(b)
+
+        _add_binds_to_func(binds, func)
+        return func
+
+    return decorator
+
+
+def add_abbreviation(
+    typed: str,
+    replacement: str,
+    callback: Optional[Callback] = None,
+    *,
+    hwnd: Optional[int] = None,
+    config: Optional[BindConfig] = None,
+    logical_config: Optional[LogicalConfig] = None,
+    hook: Optional[Hook] = None,
+) -> TextAbbreviationBind:
+    if hook is None:
+        hook = get_default_hook()
+
+    return hook.add_abbreviation(
+        typed,
+        replacement,
+        callback,
+        config=config,
+        logical_config=logical_config,
+        hwnd=hwnd,
+    )
+
+
+def bind_abbreviation(
+    typed: Union[str, List[str]],
+    replacement: str,
+    *,
+    hwnd: Optional[int] = None,
+    config: Optional[BindConfig] = None,
+    logical_config: Optional[LogicalConfig] = None,
+    hook: Optional[Hook] = None,
+) -> Callable[[Callback], Callback]:
+    def decorator(func: Callback) -> Callback:
+        nonlocal typed, hook
+        items = typed if isinstance(typed, list) else [typed]
+
+        if hook is None:
+            hook = get_default_hook()
+
+        binds = []
+        for item in items:
+            b = hook.add_abbreviation(
+                item,
+                replacement,
+                func,
+                config=config,
+                logical_config=logical_config,
+                hwnd=hwnd,
+            )
+            binds.append(b)
+
+        _add_binds_to_func(binds, func)
+        return func
+
     return decorator
 
 
@@ -69,7 +177,7 @@ def bind_mouse(
     *,
     hwnd: Optional[int] = None,
     config: Optional[MouseBindConfig] = None,
-    hook: Optional[Hook] = None
+    hook: Optional[Hook] = None,
 ) -> Callable[[Callback], Callback]:
     def decorator(func: Callback) -> Callback:
         btns = buttons if isinstance(buttons, list) else [buttons]
@@ -79,7 +187,6 @@ def bind_mouse(
         if hook is None:
             hook = get_default_hook()
 
-        # create one bind per button
         binds = []
         for btn in btns:
             b = hook.bind_mouse(btn, func, config=cfg, hwnd=hwnd)
@@ -87,4 +194,15 @@ def bind_mouse(
 
         _add_binds_to_func(binds, func)
         return func
+
     return decorator
+
+
+__all__ = [
+    "bind_key",
+    "bind_logical",
+    "bind_text",
+    "add_abbreviation",
+    "bind_abbreviation",
+    "bind_mouse",
+]
