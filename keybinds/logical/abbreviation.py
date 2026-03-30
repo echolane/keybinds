@@ -192,6 +192,13 @@ class TextAbbreviationBind(BaseBind[winput.KeyboardEvent]):
             return inj_keys | phys_mods
         return set(state.pressed_keys)
 
+
+    def is_pressed(self) -> bool:
+        with self._lock:
+            if self._pending_fire_vk is not None:
+                return True
+            return self._match_current_buffer() is not None
+
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         with self._lock:
             trace = self._trace(event)

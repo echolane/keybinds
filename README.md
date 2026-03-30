@@ -1,6 +1,6 @@
 # keybinds
 
-Flexible and high-performance global keyboard & mouse hotkeys for Windows.
+Flexible global keyboard & mouse hotkeys for Windows.
 
 ![Python](https://img.shields.io/badge/python-3.7%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey)
@@ -139,6 +139,23 @@ keybinds.unbind(my_callback)
 ```
 
 Top-level helpers use the default hook. If you use multiple hooks, prefer `hook.unbind(...)` on the specific hook.
+
+---
+
+## Bind state and waiting
+
+All bind objects expose two small runtime helpers:
+
+```python
+if bind.is_pressed():
+    print("bind is currently active")
+
+bind.wait()          # wait until the bind fires
+bind.wait(0.5)       # wait up to 0.5s, returns True/False
+```
+
+`is_pressed()` checks whether the bind is currently pressed.
+`wait(timeout=None)` blocks until the bind fires and returns `True`, or returns `False` on timeout.
 
 ---
 
@@ -405,16 +422,6 @@ Supports common patterns with simple flags:
 ## Notes
 
 Logical binds, typed-text matching, and abbreviations are currently **experimental**. The API and behavior may still change in future releases.
-
-## Performance
-
-Measured using `examples/benchmark.py` on one test system and Python build. These numbers are intended as a rough reference, not a universal baseline.
-
-- p50 ≈ 0.3 ms
-- p99 ≈ 0.5 ms
-- max < 1 ms (rare spikes up to 3–5 ms)
-
-Latency includes hook dispatch and callback scheduling (no heavy user code).
 
 ## Suppression limitations
 

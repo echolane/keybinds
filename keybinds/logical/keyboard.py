@@ -562,6 +562,46 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
     # 3. optional char-only sequence fast path
     # 4. rebuild current logical event context (layout, event_char, pressed_chars)
     # 5. match the current logical chord / advance sequence / fire trigger
+
+    def _get_pressed_now(self, state: InputState) -> Set[int]:
+        injected_now = bool(state.pressed_keys_injected)
+        return self._get_pressed_for_policy(state, inj=injected_now)
+
+    def is_pressed(self) -> bool:
+        from .._backend import _GlobalBackend
+
+        with self._lock:
+            if self._text_sequence is not None and self._text_sequence_buffer is not None:
+                current = tuple(self._normalize_char(ch) for ch in self._text_sequence_buffer)
+                target = tuple(self._normalize_char(ch) for ch in self._text_sequence)
+                return current == target
+
+            if not self._window_ok(force=True):
+                return False
+
+            state = _GlobalBackend.instance().current_state_snapshot()
+            pressed_vks = self._get_pressed_now(state)
+            shift, ctrl, alt, altgr = self._mods_from_pressed(pressed_vks)
+            layout = self._translator.current_layout()
+            pressed_chars = self._compute_pressed_chars_snapshot(
+                pressed_vks,
+                layout=layout,
+                shift=shift,
+                ctrl=ctrl,
+                alt=alt,
+                altgr=altgr,
+            )
+            chord = self.steps[self._seq_index]
+            full = self._match_chord(chord, pressed_vks, pressed_chars)
+            if not full:
+                return False
+
+            opol = self.config.constraints.order_policy
+            if opol.name.startswith("STRICT"):
+                recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
+                return self._strict_order.allows_full(chord, pressed_vks, pressed_chars, recoverable=recoverable)
+            return True
+
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         with self._lock:
             trace = self._trace(event)

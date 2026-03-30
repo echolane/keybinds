@@ -53,6 +53,7 @@ class _GlobalBackend:
 
         self._thread_id: Optional[int] = None
         self._thread_ready = threading.Event()
+        self._state_lock = threading.RLock()
 
     @classmethod
     def instance(cls) -> _GlobalBackend:
@@ -114,12 +115,24 @@ class _GlobalBackend:
                 pass
 
     def _clear_pressed_state(self) -> None:
-        self._pressed_keys.clear()
-        self._pressed_mouse.clear()
-        self._pressed_keys_all.clear()
-        self._pressed_mouse_all.clear()
-        self._pressed_keys_injected.clear()
-        self._pressed_mouse_injected.clear()
+        with self._state_lock:
+            self._pressed_keys.clear()
+            self._pressed_mouse.clear()
+            self._pressed_keys_all.clear()
+            self._pressed_mouse_all.clear()
+            self._pressed_keys_injected.clear()
+            self._pressed_mouse_injected.clear()
+
+    def current_state_snapshot(self) -> InputState:
+        with self._state_lock:
+            return InputState(
+                set(self._pressed_keys),
+                set(self._pressed_mouse),
+                set(self._pressed_keys_all),
+                set(self._pressed_mouse_all),
+                set(self._pressed_keys_injected),
+                set(self._pressed_mouse_injected),
+            )
 
     def _ensure_thread(self) -> None:
         with self._hooks_lock:
@@ -207,36 +220,37 @@ class _GlobalBackend:
 
         injected = bool(getattr(event, "injected", False))
 
-        # Choose domain for repeat detection on KEYDOWN only
-        base = self._pressed_keys_injected if injected else self._pressed_keys
-        was_down = (vk in base) if is_down else False
+        with self._state_lock:
+            # Choose domain for repeat detection on KEYDOWN only
+            base = self._pressed_keys_injected if injected else self._pressed_keys
+            was_down = (vk in base) if is_down else False
 
-        if is_down:
-            self._pressed_keys_all.add(vk)
-            base.add(vk)
-        elif is_up:
-            base.discard(vk)
-            # Only clear from the union set when the key is no longer pressed in either domain.
-            # (If it's pressed in both, a KEYUP from one side must not clear it.)
-            if (vk in self._pressed_keys) or (vk in self._pressed_keys_injected):
+            if is_down:
                 self._pressed_keys_all.add(vk)
-            else:
-                self._pressed_keys_all.discard(vk)
+                base.add(vk)
+            elif is_up:
+                base.discard(vk)
+                # Only clear from the union set when the key is no longer pressed in either domain.
+                # (If it's pressed in both, a KEYUP from one side must not clear it.)
+                if (vk in self._pressed_keys) or (vk in self._pressed_keys_injected):
+                    self._pressed_keys_all.add(vk)
+                else:
+                    self._pressed_keys_all.discard(vk)
+
+            state = InputState(
+                set(self._pressed_keys),
+                set(self._pressed_mouse),
+                set(self._pressed_keys_all),
+                set(self._pressed_mouse_all),
+                set(self._pressed_keys_injected),
+                set(self._pressed_mouse_injected),
+            )
 
         # Mark OS auto-repeat (keydown while already pressed in that domain)
         try:
             setattr(event, "_sb_is_repeat", bool(is_down and was_down))
         except Exception:
             pass
-
-        state = InputState(
-            self._pressed_keys,
-            self._pressed_mouse,
-            self._pressed_keys_all,
-            self._pressed_mouse_all,
-            self._pressed_keys_injected,
-            self._pressed_mouse_injected,
-        )
 
         flags = winput.WP_CONTINUE
         for h in self._alive_hooks():
@@ -281,27 +295,28 @@ class _GlobalBackend:
         is_down = act in (WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN)
         is_up = act in (WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP, WM_XBUTTONUP)
 
-        base = self._pressed_mouse_injected if injected else self._pressed_mouse
+        with self._state_lock:
+            base = self._pressed_mouse_injected if injected else self._pressed_mouse
 
-        if is_down:
-            self._pressed_mouse_all.add(btn)
-            base.add(btn)
-        elif is_up:
-            base.discard(btn)
-            # Only clear from union when it's no longer pressed in either domain.
-            if (btn in self._pressed_mouse) or (btn in self._pressed_mouse_injected):
+            if is_down:
                 self._pressed_mouse_all.add(btn)
-            else:
-                self._pressed_mouse_all.discard(btn)
+                base.add(btn)
+            elif is_up:
+                base.discard(btn)
+                # Only clear from union when it's no longer pressed in either domain.
+                if (btn in self._pressed_mouse) or (btn in self._pressed_mouse_injected):
+                    self._pressed_mouse_all.add(btn)
+                else:
+                    self._pressed_mouse_all.discard(btn)
 
-        state = InputState(
-            self._pressed_keys,
-            self._pressed_mouse,
-            self._pressed_keys_all,
-            self._pressed_mouse_all,
-            self._pressed_keys_injected,
-            self._pressed_mouse_injected,
-        )
+            state = InputState(
+                set(self._pressed_keys),
+                set(self._pressed_mouse),
+                set(self._pressed_keys_all),
+                set(self._pressed_mouse_all),
+                set(self._pressed_keys_injected),
+                set(self._pressed_mouse_injected),
+            )
 
         flags = winput.WP_CONTINUE
         for h in self._alive_hooks():

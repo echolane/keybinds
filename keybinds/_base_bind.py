@@ -44,6 +44,8 @@ class BaseBind(Generic[E]):
         self._fires: int = 0
 
         self._lock = threading.RLock()
+        self._fire_wait = threading.Condition()
+        self._fire_count: int = 0
         self.hook: Optional["Hook"] = None
 
     @staticmethod
@@ -90,6 +92,14 @@ class BaseBind(Generic[E]):
 
     def reset(self) -> None:
         pass
+
+    def is_pressed(self) -> bool:
+        return False
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        with self._fire_wait:
+            current = self._fire_count
+            return self._fire_wait.wait_for(lambda: self._fire_count != current, timeout=timeout)
 
     def _window_ok(self, *, force: bool = False, trace: Optional[_EventTrace] = None) -> bool:
         if self.window is None:
@@ -167,4 +177,7 @@ class BaseBind(Generic[E]):
         return True
 
     def _fire(self, trace: Optional[_DispatchTrace] = None) -> None:
+        with self._fire_wait:
+            self._fire_count += 1
+            self._fire_wait.notify_all()
         self._dispatch(self.callback, trace)

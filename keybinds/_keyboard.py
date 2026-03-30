@@ -335,6 +335,29 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
         return set(state.pressed_keys)
 
+    def _get_pressed_now(self, state: InputState) -> Set[int]:
+        injected_now = bool(state.pressed_keys_injected)
+        return self._get_pressed_for_policy(state, inj=injected_now)
+
+    def is_pressed(self) -> bool:
+        from ._backend import _GlobalBackend
+
+        with self._lock:
+            if not self._window_ok(force=True):
+                return False
+            state = _GlobalBackend.instance().current_state_snapshot()
+            chord = self.steps[self._seq_index]
+            pressed = self._get_pressed_now(state)
+            full = self._match_chord(chord, pressed)
+            if not full:
+                return False
+
+            opol = self.config.constraints.order_policy
+            if opol.name.startswith("STRICT"):
+                recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
+                return self._strict_order.allows_full(chord, pressed, recoverable=recoverable)
+            return True
+
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
         with self._lock:
