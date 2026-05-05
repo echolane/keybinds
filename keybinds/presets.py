@@ -37,6 +37,7 @@ def timing(
     repeat_delay_ms: Optional[int] = None,
     repeat_interval_ms: Optional[int] = None,
     double_tap_window_ms: Optional[int] = None,
+    triple_tap_window_ms: Optional[int] = None,
     chord_timeout_ms: Optional[int] = None,
     cooldown_ms: Optional[int] = None,
     debounce_ms: Optional[int] = None,
@@ -51,6 +52,8 @@ def timing(
         t = replace(t, repeat_interval_ms=repeat_interval_ms)
     if double_tap_window_ms is not None:
         t = replace(t, double_tap_window_ms=double_tap_window_ms)
+    if triple_tap_window_ms is not None:
+        t = replace(t, triple_tap_window_ms=triple_tap_window_ms)
     if chord_timeout_ms is not None:
         t = replace(t, chord_timeout_ms=chord_timeout_ms)
     if cooldown_ms is not None:
@@ -212,6 +215,23 @@ def double_tap(
     )
 
 
+def triple_tap(
+    window_ms: int = 300,
+    *,
+    suppress: SuppressPolicy = SuppressPolicy.NEVER,
+    cooldown_ms: Optional[int] = None,
+    debounce_ms: Optional[int] = None,
+    strict: bool = False,
+) -> BindConfig:
+    t = timing(triple_tap_window_ms=window_ms, cooldown_ms=cooldown_ms, debounce_ms=debounce_ms)
+    return BindConfig(
+        trigger=Trigger.ON_TRIPLE_TAP,
+        suppress=suppress,
+        timing=t,
+        constraints=(strict_constraints() if strict else Constraints()),
+    )
+
+
 def sequence(
     timeout_ms: int = 550,
     *,
@@ -301,6 +321,17 @@ def mouse_double_tap(
 ) -> MouseBindConfig:
     t = timing(double_tap_window_ms=window_ms, cooldown_ms=cooldown_ms, debounce_ms=debounce_ms)
     return MouseBindConfig(trigger=Trigger.ON_DOUBLE_TAP, suppress=suppress, timing=t)
+
+
+def mouse_triple_tap(
+    window_ms: int = 300,
+    *,
+    suppress: SuppressPolicy = SuppressPolicy.NEVER,
+    cooldown_ms: Optional[int] = None,
+    debounce_ms: Optional[int] = None,
+) -> MouseBindConfig:
+    t = timing(triple_tap_window_ms=window_ms, cooldown_ms=cooldown_ms, debounce_ms=debounce_ms)
+    return MouseBindConfig(trigger=Trigger.ON_TRIPLE_TAP, suppress=suppress, timing=t)
 
 
 # -----------------------------
@@ -404,6 +435,16 @@ def rapid_double_tap(
 ) -> BindConfig:
     """Fast 'dash' style double tap with a short cooldown."""
     return double_tap(window_ms=window_ms, cooldown_ms=cooldown_ms, suppress=suppress)
+
+
+def rapid_triple_tap(
+    *,
+    window_ms: int = 260,
+    cooldown_ms: int = 150,
+    suppress: SuppressPolicy = SuppressPolicy.NEVER,
+) -> BindConfig:
+    """Fast triple tap with a short cooldown."""
+    return triple_tap(window_ms=window_ms, cooldown_ms=cooldown_ms, suppress=suppress)
 
 
 def cheatcode_sequence(

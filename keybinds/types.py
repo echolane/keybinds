@@ -21,6 +21,7 @@ class Trigger(Enum):
     ON_HOLD = auto()
     ON_REPEAT = auto()
     ON_DOUBLE_TAP = auto()
+    ON_TRIPLE_TAP = auto()
     ON_CHORD_COMPLETE = auto()
     ON_CHORD_RELEASED = auto()
     ON_SEQUENCE = auto()
@@ -100,6 +101,7 @@ class Timing:
     repeat_delay_ms: int = 350
     repeat_interval_ms: int = 60
     double_tap_window_ms: int = 300
+    triple_tap_window_ms: int = 300
     window_focus_cache_ms: int = 50
     cooldown_ms: int = 0
 

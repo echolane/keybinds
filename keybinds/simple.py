@@ -22,17 +22,19 @@ def _build_config(
     repeat: Optional[int] = None,
     sequence: bool = False,
     double_tap: bool = False,
+    triple_tap: bool = False,
     suppress: bool = False,
     # optional timings:
     delay: Optional[int] = None,    # repeat initial delay (ms)
     timeout: Optional[int] = None,  # sequence timeout / chord timeout (ms)
     double_tap_window: Optional[int] = None,
+    triple_tap_window: Optional[int] = None,
 ) -> BindConfig:
     """
     Convert simple flags into BindConfig.
 
     Priority:
-        hold > repeat > sequence > double_tap > release > press(default)
+        hold > repeat > sequence > double_tap/triple_tap > release > press(default)
     """
     # Count mutually-exclusive trigger-ish flags
     exclusive_flags = [
@@ -41,11 +43,12 @@ def _build_config(
         repeat is not None,
         sequence,
         double_tap,
+        triple_tap,
     ]
     if sum(bool(x) for x in exclusive_flags) > 1:
         raise ValueError(
             "Conflicting flags: use only one of "
-            "release / hold / repeat / sequence / double_tap"
+            "release / hold / repeat / sequence / double_tap / triple_tap"
         )
 
     trigger = Trigger.ON_PRESS
@@ -72,6 +75,11 @@ def _build_config(
         if double_tap_window is not None:
             timing_kwargs["double_tap_window_ms"] = int(double_tap_window)
 
+    elif triple_tap:
+        trigger = Trigger.ON_TRIPLE_TAP
+        if triple_tap_window is not None:
+            timing_kwargs["triple_tap_window_ms"] = int(triple_tap_window)
+
     elif release:
         trigger = Trigger.ON_RELEASE
 
@@ -92,20 +100,23 @@ def _build_mouse_config(
     hold: Optional[int] = None,
     repeat: Optional[int] = None,
     double_tap: bool = False,
+    triple_tap: bool = False,
     suppress: bool = False,
     delay: Optional[int] = None,
     double_tap_window: Optional[int] = None,
+    triple_tap_window: Optional[int] = None,
 ) -> MouseBindConfig:
     exclusive_flags = [
         release,
         hold is not None,
         repeat is not None,
         double_tap,
+        triple_tap,
     ]
     if sum(bool(x) for x in exclusive_flags) > 1:
         raise ValueError(
             "Conflicting flags: use only one of "
-            "release / hold / repeat / double_tap"
+            "release / hold / repeat / double_tap / triple_tap"
         )
 
     trigger = Trigger.ON_PRESS
@@ -125,6 +136,11 @@ def _build_mouse_config(
         trigger = Trigger.ON_DOUBLE_TAP
         if double_tap_window is not None:
             timing_kwargs["double_tap_window_ms"] = int(double_tap_window)
+
+    elif triple_tap:
+        trigger = Trigger.ON_TRIPLE_TAP
+        if triple_tap_window is not None:
+            timing_kwargs["triple_tap_window_ms"] = int(triple_tap_window)
 
     elif release:
         trigger = Trigger.ON_RELEASE
@@ -148,11 +164,13 @@ def hotkey(
     repeat: Optional[int] = None,
     sequence: bool = False,
     double_tap: bool = False,
+    triple_tap: bool = False,
     suppress: bool = False,
     # optional ergonomics:
     delay: Optional[int] = None,
     timeout: Optional[int] = None,
     double_tap_window: Optional[int] = None,
+    triple_tap_window: Optional[int] = None,
     hwnd: Optional[int] = None,
     hook: Optional[Hook] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -166,6 +184,7 @@ def hotkey(
         @hotkey("space", repeat=80, delay=200)
         @hotkey("g,k,i", sequence=True, timeout=600)
         @hotkey("d", double_tap=True, double_tap_window=250)
+        @hotkey("t", triple_tap=True, triple_tap_window=300)
         @hotkey("ctrl+r", suppress=True)
     """
     target_hook = hook or get_hook()
@@ -176,10 +195,12 @@ def hotkey(
         repeat=repeat,
         sequence=sequence,
         double_tap=double_tap,
+        triple_tap=triple_tap,
         suppress=suppress,
         delay=delay,
         timeout=timeout,
         double_tap_window=double_tap_window,
+        triple_tap_window=triple_tap_window,
     )
 
     return bind_key(expr, config=cfg, hwnd=hwnd, hook=target_hook)
@@ -192,9 +213,11 @@ def mouse(
     hold: Optional[int] = None,
     repeat: Optional[int] = None,
     double_tap: bool = False,
+    triple_tap: bool = False,
     suppress: bool = False,
     delay: Optional[int] = None,
     double_tap_window: Optional[int] = None,
+    triple_tap_window: Optional[int] = None,
     hwnd: Optional[int] = None,
     hook: Optional[Hook] = None,
 ):
@@ -207,6 +230,7 @@ def mouse(
         @mouse("left", release=True)
         @mouse("middle", hold=300)
         @mouse("x1", double_tap=True, double_tap_window=250)
+        @mouse("x2", triple_tap=True, triple_tap_window=300)
     """
     target_hook = hook or get_hook()
 
@@ -215,9 +239,11 @@ def mouse(
         hold=hold,
         repeat=repeat,
         double_tap=double_tap,
+        triple_tap=triple_tap,
         suppress=suppress,
         delay=delay,
         double_tap_window=double_tap_window,
+        triple_tap_window=triple_tap_window,
     )
 
     return bind_mouse(button, config=cfg, hwnd=hwnd, hook=target_hook)

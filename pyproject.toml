@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keybinds"
-version = "1.3.1"
+version = "1.3.2"
 description = "Flexible global keyboard & mouse hotkeys for Windows"
 readme = "README.md"
 requires-python = ">=3.7"

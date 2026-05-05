@@ -312,3 +312,66 @@ def test_hook_bind_mouse_press_click_and_hold_runtime(runtime_env):
     assert _wait_until(lambda: hits.count('hold') == 1)
     driver.mouse('x1', 'up')
     assert hits == ['press', 'click', 'hold']
+
+
+def test_hook_bind_keyboard_triple_tap_runtime(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind('q', lambda: hits.append('triple'), config=BindConfig(trigger=Trigger.ON_TRIPLE_TAP, timing=Timing(triple_tap_window_ms=200)))
+
+    driver.key(ord('Q'), 'down')
+    driver.key(ord('Q'), 'up')
+    driver.key(ord('Q'), 'down', dt=50)
+    driver.key(ord('Q'), 'up')
+    assert hits == []
+
+    driver.key(ord('Q'), 'down', dt=50)
+    assert hits == ['triple']
+
+
+def test_hook_bind_mouse_triple_tap_runtime(runtime_env):
+    MouseBindConfig = runtime_env.types.MouseBindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind_mouse('left', lambda: hits.append('triple'), config=MouseBindConfig(trigger=Trigger.ON_TRIPLE_TAP, timing=Timing(triple_tap_window_ms=200)))
+
+    driver.mouse('left', 'down')
+    driver.mouse('left', 'up')
+    driver.mouse('left', 'down', dt=50)
+    driver.mouse('left', 'up')
+    assert hits == []
+
+    driver.mouse('left', 'down', dt=50)
+    assert hits == ['triple']
+
+
+def test_hook_bind_logical_triple_tap_runtime(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind_logical('q', lambda: hits.append('triple'), config=BindConfig(trigger=Trigger.ON_TRIPLE_TAP, timing=Timing(triple_tap_window_ms=200)))
+
+    driver.key(ord('Q'), 'down')
+    driver.key(ord('Q'), 'up')
+    driver.key(ord('Q'), 'down', dt=50)
+    driver.key(ord('Q'), 'up')
+    assert hits == []
+
+    driver.key(ord('Q'), 'down', dt=50)
+    assert hits == ['triple']

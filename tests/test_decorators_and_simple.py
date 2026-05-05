@@ -74,6 +74,14 @@ def test_simple_build_config_validates_conflicts_and_priorities(kb_env):
     assert cfg.timing.chord_timeout_ms == 650
     assert cfg.suppress is kb_env.types.SuppressPolicy.WHEN_MATCHED
 
+    cfg = simple._build_config(triple_tap=True, triple_tap_window=275)
+    assert cfg.trigger is Trigger.ON_TRIPLE_TAP
+    assert cfg.timing.triple_tap_window_ms == 275
+
+    mouse_cfg = simple._build_mouse_config(triple_tap=True, triple_tap_window=325)
+    assert mouse_cfg.trigger is Trigger.ON_TRIPLE_TAP
+    assert mouse_cfg.timing.triple_tap_window_ms == 325
+
 
 def test_simple_hotkey_builds_config_and_flows_into_decorator_binding(kb_env):
     simple = kb_env.simple

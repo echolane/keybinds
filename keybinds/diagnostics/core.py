@@ -112,6 +112,7 @@ class BindMetadata:
     repeat_delay_ms: Optional[int] = None
     repeat_interval_ms: Optional[int] = None
     double_tap_window_ms: Optional[int] = None
+    triple_tap_window_ms: Optional[int] = None
     is_sequence: bool = False
 
 

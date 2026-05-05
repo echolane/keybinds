@@ -717,16 +717,28 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
                     threading.Thread(target=_repeat, daemon=True).start()
 
-            elif trig == Trigger.ON_DOUBLE_TAP and full and fresh_down and not is_repeat:
-                win = self.config.timing.double_tap_window_ms
+            elif trig in (Trigger.ON_DOUBLE_TAP, Trigger.ON_TRIPLE_TAP) and full and fresh_down and not is_repeat:
+                required_taps = 2 if trig == Trigger.ON_DOUBLE_TAP else 3
+                win = (
+                    self.config.timing.double_tap_window_ms
+                    if trig == Trigger.ON_DOUBLE_TAP
+                    else self.config.timing.triple_tap_window_ms
+                )
                 if (now_ms - self._tap_last_ms) <= win:
                     self._tap_count += 1
                 else:
                     self._tap_count = 1
                 self._tap_last_ms = now_ms
-                trace.note("decision", "double_tap_progress", tap_count=self._tap_count, window_ms=win)
+                progress_reason = "double_tap_progress" if trig == Trigger.ON_DOUBLE_TAP else "triple_tap_progress"
+                trace.note(
+                    "decision",
+                    progress_reason,
+                    tap_count=self._tap_count,
+                    required_taps=required_taps,
+                    window_ms=win,
+                )
 
-                if self._tap_count >= 2:
+                if self._tap_count >= required_taps:
                     self._tap_count = 0
                     fired = fire_if_allowed(now_ms)
                     if fired is not None and self.config.suppress == SuppressPolicy.WHEN_MATCHED:

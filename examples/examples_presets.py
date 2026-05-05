@@ -8,8 +8,8 @@ Manual test: press keys and click mouse, watch console output.
 
 from keybinds import Hook, SuppressPolicy, BindConfig
 from keybinds.presets import (
-    press, release, chord_released, click, hold, repeat, double_tap, sequence,
-    mouse_press, mouse_release, mouse_hold, mouse_repeat, mouse_double_tap
+    press, release, chord_released, click, hold, repeat, double_tap, triple_tap, sequence,
+    mouse_press, mouse_release, mouse_hold, mouse_repeat, mouse_double_tap, mouse_triple_tap
 )
 
 hook = Hook()
@@ -36,8 +36,9 @@ hook.bind("k", lambda: hit("k hold"), config=hold(450))
 # Repeat while held
 hook.bind("j", lambda: hit("j repeat tick"), config=repeat(delay_ms=250, interval_ms=120))
 
-# Double tap
+# Double / triple tap
 hook.bind("d", lambda: hit("d double tap"), config=double_tap(300))
+hook.bind("t", lambda: hit("t triple tap"), config=triple_tap(300))
 
 # Sequence
 hook.bind("g,k,i", lambda: hit("sequence g,k,i"), config=sequence(600))
@@ -51,6 +52,7 @@ hook.bind_mouse("left", lambda: hit("mouse left press"), config=mouse_press())
 hook.bind_mouse("right", lambda: hit("mouse right hold"), config=mouse_hold(350))
 hook.bind_mouse("left", lambda: hit("mouse left repeat tick"), config=mouse_repeat(delay_ms=180, interval_ms=80))
 hook.bind_mouse("left", lambda: hit("mouse left double"), config=mouse_double_tap(300))
+hook.bind_mouse("middle", lambda: hit("mouse middle triple"), config=mouse_triple_tap(300))
 
 # Middle release suppression (requires paired suppression support for full click blocking)
 hook.bind_mouse(
@@ -60,7 +62,7 @@ hook.bind_mouse(
 )
 
 print("Presets example running. Try:")
-print("  KB: Ctrl+E, Ctrl+R, Ctrl+T, Ctrl+G, tap/hold K, hold J, double-tap D, sequence G,K,I, hold Space")
-print("  Mouse: left click, hold right, double-click left, middle click (release)")
+print("  KB: Ctrl+E, Ctrl+R, Ctrl+T, Ctrl+G, tap/hold K, hold J, double-tap D, triple-tap T, sequence G,K,I, hold Space")
+print("  Mouse: left click, hold right, double-click left, triple-click middle")
 print("Ctrl+C to exit.")
 hook.join()

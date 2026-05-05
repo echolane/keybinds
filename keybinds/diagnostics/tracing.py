@@ -381,6 +381,7 @@ def build_bind_metadata(bind_name: str, device: str, config: Any) -> BindMetadat
         repeat_delay_ms=_safe_int(getattr(timing, 'repeat_delay_ms', None)),
         repeat_interval_ms=_safe_int(getattr(timing, 'repeat_interval_ms', None)),
         double_tap_window_ms=_safe_int(getattr(timing, 'double_tap_window_ms', None)),
+        triple_tap_window_ms=_safe_int(getattr(timing, 'triple_tap_window_ms', None)),
         is_sequence=',' in bind_name,
     )
 

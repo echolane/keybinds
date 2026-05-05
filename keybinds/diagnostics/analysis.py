@@ -141,9 +141,9 @@ def _failure_rank(candidate: BindDecision) -> int:
 
 def _intermediate_rank(candidate: BindDecision) -> int:
     reason = candidate.terminal_reason
-    if reason in ("sequence_waiting_for_next_step", "waiting_for_release", "waiting_for_full_release", "click_waiting_for_release", "hold_waiting_or_cancelled", "repeat_waiting_for_first_tick", "repeat_active", "double_tap_waiting_for_second_tap"):
+    if reason in ("sequence_waiting_for_next_step", "waiting_for_release", "waiting_for_full_release", "click_waiting_for_release", "hold_waiting_or_cancelled", "repeat_waiting_for_first_tick", "repeat_active", "double_tap_waiting_for_second_tap", "triple_tap_waiting_for_next_tap"):
         return 20
-    if reason in ("chord_not_complete", "release_not_armed", "chord_was_not_fully_pressed", "hold_not_started", "repeat_not_started", "click_not_started", "double_tap_not_started", "event_seen_but_bind_not_ready"):
+    if reason in ("chord_not_complete", "release_not_armed", "chord_was_not_fully_pressed", "hold_not_started", "repeat_not_started", "click_not_started", "double_tap_not_started", "triple_tap_not_started", "event_seen_but_bind_not_ready"):
         return 10
     return 0
 
@@ -161,13 +161,13 @@ def _is_relevant_candidate(candidate: BindDecision, raw: Optional[DiagnosticReco
     if reason == 'sequence_waiting_for_next_step':
         steps = int(details.get('steps_matched', details.get('seq_index', 0)) or 0)
         return steps > 0
-    if reason in ('hold_waiting_or_cancelled', 'repeat_waiting_for_first_tick', 'repeat_active', 'double_tap_waiting_for_second_tap', 'click_waiting_for_release', 'waiting_for_release', 'waiting_for_full_release'):
+    if reason in ('hold_waiting_or_cancelled', 'repeat_waiting_for_first_tick', 'repeat_active', 'double_tap_waiting_for_second_tap', 'triple_tap_waiting_for_next_tap', 'click_waiting_for_release', 'waiting_for_release', 'waiting_for_full_release'):
         return True
     if reason == 'chord_not_complete':
         return bool(details.get('any_chord_key_pressed') or details.get('full') or details.get('chord_full'))
     if reason == 'event_seen_but_bind_not_ready':
         return bool(details.get('any_chord_key_pressed') or details.get('seq_index') or details.get('hold_timer_started') or details.get('repeat_started') or details.get('tap_count'))
-    if reason in ('hold_not_started', 'repeat_not_started', 'click_not_started', 'double_tap_not_started', 'release_not_armed', 'chord_was_not_fully_pressed'):
+    if reason in ('hold_not_started', 'repeat_not_started', 'click_not_started', 'double_tap_not_started', 'triple_tap_not_started', 'release_not_armed', 'chord_was_not_fully_pressed'):
         if raw_button is not None:
             button_name = str(raw_button).lower()
             return candidate.bind.lower() == button_name or candidate.bind.lower().endswith(button_name)
@@ -308,6 +308,10 @@ def _primary_detail_lines(decision: BindDecision) -> List[str]:
         window_ms = details.get('double_tap_window_ms') or (decision.metadata.double_tap_window_ms if decision.metadata is not None else None)
         if window_ms is not None:
             out.append(f"Double-tap window: {window_ms} ms")
+    elif reason in ('triple_tap_waiting_for_next_tap', 'triple_tap_not_started'):
+        window_ms = details.get('triple_tap_window_ms') or (decision.metadata.triple_tap_window_ms if decision.metadata is not None else None)
+        if window_ms is not None:
+            out.append(f"Triple-tap window: {window_ms} ms")
     elif reason in ('chord_not_complete', 'release_not_armed', 'chord_was_not_fully_pressed', 'waiting_for_release', 'waiting_for_full_release', 'bind_fired', 'callback_finished', 'callback_error', 'async_finished', 'async_error'):
         full = decision.trigger_details.get('full')
         if full is not None:
@@ -504,9 +508,13 @@ def _update_trigger_details(trigger_details: Dict[str, Any], rec: DiagnosticReco
         trigger_details['repeat_ticks'] = int(trigger_details.get('repeat_ticks', 0)) + 1
     elif reason == 'repeat_cancelled':
         trigger_details['repeat_cancelled'] = details.get('reason_detail', True)
-    elif reason == 'double_tap_progress':
+    elif reason in ('double_tap_progress', 'triple_tap_progress'):
         trigger_details['tap_count'] = details.get('tap_count')
-        trigger_details['double_tap_window_ms'] = details.get('window_ms', trigger_details.get('double_tap_window_ms'))
+        trigger_details['required_taps'] = details.get('required_taps', trigger_details.get('required_taps'))
+        if reason == 'double_tap_progress':
+            trigger_details['double_tap_window_ms'] = details.get('window_ms', trigger_details.get('double_tap_window_ms'))
+        else:
+            trigger_details['triple_tap_window_ms'] = details.get('window_ms', trigger_details.get('triple_tap_window_ms'))
 
 
 def _infer_terminal_reason(records: Sequence[DiagnosticRecord], metadata: Optional[BindMetadata], trigger_details: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
@@ -536,6 +544,11 @@ def _infer_terminal_reason(records: Sequence[DiagnosticRecord], metadata: Option
         if taps == 1:
             return 'double_tap_waiting_for_second_tap', 'trigger', dict(trigger_details)
         return 'double_tap_not_started', 'trigger', dict(trigger_details)
+    if trigger == 'on_triple_tap':
+        taps = trigger_details.get('tap_count')
+        if taps in (1, 2):
+            return 'triple_tap_waiting_for_next_tap', 'trigger', dict(trigger_details)
+        return 'triple_tap_not_started', 'trigger', dict(trigger_details)
     if trigger == 'on_release':
         if trigger_details.get('chord_full'):
             return 'waiting_for_release', 'trigger', dict(trigger_details)
@@ -660,6 +673,15 @@ def _reason_text(reason: str, details: Dict[str, Any], metadata: Optional[BindMe
         return f"waiting for the second tap within {window_ms} ms" if window_ms is not None else 'waiting for the second tap'
     if reason == 'double_tap_not_started':
         return 'double tap has not started yet'
+    if reason == 'triple_tap_waiting_for_next_tap':
+        window_ms = details.get('triple_tap_window_ms')
+        taps = details.get('tap_count')
+        next_tap = int(taps) + 1 if isinstance(taps, int) else None
+        if next_tap is not None and window_ms is not None:
+            return f"waiting for tap {next_tap} of 3 within {window_ms} ms"
+        return 'waiting for the next tap'
+    if reason == 'triple_tap_not_started':
+        return 'triple tap has not started yet'
     if reason == 'click_waiting_for_release':
         return 'click started and is waiting for button release'
     if reason == 'click_not_started':
@@ -753,6 +775,12 @@ def _trigger_lines(decision: BindDecision) -> List[str]:
         window_ms = d.get('double_tap_window_ms') or (decision.metadata.double_tap_window_ms if decision.metadata is not None else None)
         if window_ms is not None:
             out.append(f"double-tap window: {window_ms} ms")
+        if d.get('tap_count') is not None:
+            out.append(f"tap count observed: {d['tap_count']}")
+    elif trigger == 'on_triple_tap':
+        window_ms = d.get('triple_tap_window_ms') or (decision.metadata.triple_tap_window_ms if decision.metadata is not None else None)
+        if window_ms is not None:
+            out.append(f"triple-tap window: {window_ms} ms")
         if d.get('tap_count') is not None:
             out.append(f"tap count observed: {d['tap_count']}")
     return out
