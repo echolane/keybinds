@@ -5,7 +5,7 @@ Flexible global keyboard & mouse hotkeys for Windows.
 ![Python](https://img.shields.io/badge/python-3.7%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-active-success)
+![Status](https://img.shields.io/badge/status-maintenance-yellow)
 ![PyPI](https://img.shields.io/pypi/v/keybinds)
 
 **keybinds** is a Python library for global keyboard and mouse binds on Windows, with support for hotkeys, logical key binds, text matching, and text abbreviations.
