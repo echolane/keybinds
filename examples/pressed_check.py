@@ -21,7 +21,14 @@ hook.start()
 
 try:
     while True:
-        print({name: b.is_pressed() for name, b in items.items()})
+        print({
+            name: {
+                "is_pressed": b.is_pressed(),
+                "any_pressed": b.any_pressed(),
+                "pressed_keys": b.pressed_keys(),
+            }
+            for name, b in items.items()
+        })
         time.sleep(0.2)
 except KeyboardInterrupt:
     hook.close()

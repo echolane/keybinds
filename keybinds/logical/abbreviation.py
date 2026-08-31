@@ -194,10 +194,25 @@ class TextAbbreviationBind(BaseBind[winput.KeyboardEvent]):
 
 
     def is_pressed(self) -> bool:
+        """True if the abbreviation buffer currently matches (or fire is pending)."""
         with self._lock:
             if self._pending_fire_vk is not None:
                 return True
             return self._match_current_buffer() is not None
+
+    def any_pressed(self) -> bool:
+        """True if there is any buffer progress or a pending fire for this abbreviation."""
+        with self._lock:
+            if self._pending_fire_vk is not None:
+                return True
+            buf = getattr(self, "_buffer", None)
+            if buf is not None and len(buf) > 0:
+                return True
+            return self._match_current_buffer() is not None
+
+    def pressed_keys(self):
+        """Not meaningful for text-stream abbreviation binds; always returns []."""
+        return []
 
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         with self._lock:

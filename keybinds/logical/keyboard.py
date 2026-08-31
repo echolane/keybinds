@@ -474,6 +474,15 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
             return inj_keys | phys_mods
         return set(state.pressed_keys)
 
+    def _get_held_for_policy(self, state: InputState) -> Set[int]:
+        """Keys currently held for this bind across physical and injected domains."""
+        pol = self.config.injected
+        if pol == InjectedPolicy.IGNORE:
+            return set(state.pressed_keys)
+        if pol == InjectedPolicy.ONLY:
+            return set(state.pressed_keys_injected or ())
+        return set(state.pressed_keys) | set(state.pressed_keys_injected or ())
+
     # Rebuild logical characters for the *current* pressed-key snapshot.
     #
     # This is the core of layout-aware matching for logical chords. We do not
@@ -555,6 +564,61 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 return True
         return False
 
+    def _required_groups_held(self, chord: _LogicalChordSpec, pressed_vks: Set[int], pressed_chars: Dict[int, str]) -> bool:
+        for g in chord.groups:
+            if not self._group_present(g, pressed_vks, pressed_chars):
+                return False
+        return True
+
+    def _match_held_snapshot(self, chord: _LogicalChordSpec, pressed_vks: Set[int], *, layout: int) -> bool:
+        shift, ctrl, alt, altgr = self._mods_from_pressed(pressed_vks)
+        pressed_chars = self._compute_pressed_chars_snapshot(
+            pressed_vks,
+            layout=layout,
+            shift=shift,
+            ctrl=ctrl,
+            alt=alt,
+            altgr=altgr,
+        )
+        return self._match_chord(chord, pressed_vks, pressed_chars)
+
+    def _held_chord_full(
+        self,
+        state: InputState,
+        chord: _LogicalChordSpec,
+        *,
+        layout: int,
+        inj: bool = False,
+        event_match: Optional[bool] = None,
+    ) -> bool:
+        pol = self.config.injected
+        injected = state.pressed_keys_injected or ()
+        if pol == InjectedPolicy.IGNORE:
+            if event_match is not None and not inj:
+                return event_match
+            return self._match_held_snapshot(chord, set(state.pressed_keys), layout=layout)
+        if pol == InjectedPolicy.ONLY:
+            if event_match is not None and inj:
+                return event_match
+            return self._match_held_snapshot(chord, set(injected), layout=layout)
+        if not inj:
+            if event_match:
+                return True
+            if event_match is False and not injected:
+                return False
+            if event_match is None and self._match_held_snapshot(chord, set(state.pressed_keys), layout=layout):
+                return True
+            if not injected:
+                return False
+            phys_mods = {vk for vk in state.pressed_keys if is_modifier_vk(vk)}
+            return self._match_held_snapshot(chord, set(injected) | phys_mods, layout=layout)
+        if self._match_held_snapshot(chord, set(state.pressed_keys), layout=layout):
+            return True
+        if event_match is not None:
+            return event_match
+        phys_mods = {vk for vk in state.pressed_keys if is_modifier_vk(vk)}
+        return self._match_held_snapshot(chord, set(injected) | phys_mods, layout=layout)
+
     # Main runtime pipeline for LogicalBind. The order here is important:
     #
     # 1. pre-checks and debounce / timeout handling
@@ -564,10 +628,10 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
     # 5. match the current logical chord / advance sequence / fire trigger
 
     def _get_pressed_now(self, state: InputState) -> Set[int]:
-        injected_now = bool(state.pressed_keys_injected)
-        return self._get_pressed_for_policy(state, inj=injected_now)
+        return self._get_held_for_policy(state)
 
     def is_pressed(self) -> bool:
+        """True if the full logical chord / text sequence of the current step is active."""
         from .._backend import _GlobalBackend
 
         with self._lock:
@@ -575,6 +639,48 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 current = tuple(self._normalize_char(ch) for ch in self._text_sequence_buffer)
                 target = tuple(self._normalize_char(ch) for ch in self._text_sequence)
                 return current == target
+
+            if not self._window_ok(force=True):
+                return False
+
+            state = _GlobalBackend.instance().current_state_snapshot()
+            layout = self._translator.current_layout()
+            chord = self.steps[self._seq_index]
+            if not self._held_chord_full(state, chord, layout=layout):
+                return False
+
+            opol = self.config.constraints.order_policy
+            if opol.name.startswith("STRICT"):
+                recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
+                pressed_vks = self._get_pressed_now(state)
+                shift, ctrl, alt, altgr = self._mods_from_pressed(pressed_vks)
+                pressed_chars = self._compute_pressed_chars_snapshot(
+                    pressed_vks,
+                    layout=layout,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                    altgr=altgr,
+                )
+                return self._strict_order.allows_full(
+                    chord,
+                    pressed_vks,
+                    set(pressed_chars.values()),
+                    self._normalize_char,
+                    recoverable=recoverable,
+                )
+            return True
+
+    def any_pressed(self) -> bool:
+        """True if any key/char group of the current logical chord step is held.
+
+        For pure text-sequence binds, True if the buffer has any progress toward the target.
+        """
+        from .._backend import _GlobalBackend
+
+        with self._lock:
+            if self._text_sequence is not None and self._text_sequence_buffer is not None:
+                return len(self._text_sequence_buffer) > 0
 
             if not self._window_ok(force=True):
                 return False
@@ -592,21 +698,43 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 altgr=altgr,
             )
             chord = self.steps[self._seq_index]
-            full = self._match_chord(chord, pressed_vks, pressed_chars)
-            if not full:
-                return False
+            return self._any_chord_key_pressed(chord, pressed_vks, pressed_chars)
 
-            opol = self.config.constraints.order_policy
-            if opol.name.startswith("STRICT"):
-                recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
-                return self._strict_order.allows_full(
-                    chord,
-                    pressed_vks,
-                    set(pressed_chars.values()),
-                    self._normalize_char,
-                    recoverable=recoverable,
-                )
-            return True
+    def pressed_keys(self):
+        """Sorted list of VK codes from the current logical chord that are currently held.
+
+        Character-only groups are represented via the physical VKs that currently
+        produce those characters (when available). For text-sequence mode returns [].
+        """
+        from .._backend import _GlobalBackend
+
+        with self._lock:
+            if self._text_sequence is not None and self._text_sequence_buffer is not None:
+                return []
+
+            if not self._window_ok(force=True):
+                return []
+
+            state = _GlobalBackend.instance().current_state_snapshot()
+            pressed_vks = self._get_pressed_now(state)
+            shift, ctrl, alt, altgr = self._mods_from_pressed(pressed_vks)
+            layout = self._translator.current_layout()
+            pressed_chars = self._compute_pressed_chars_snapshot(
+                pressed_vks,
+                layout=layout,
+                shift=shift,
+                ctrl=ctrl,
+                alt=alt,
+                altgr=altgr,
+            )
+            chord = self.steps[self._seq_index]
+            # Prefer explicit VK union; also include VKs whose current logical char matches allowed_chars
+            out = set(pressed_vks) & set(chord.allowed_vk_union)
+            allowed_chars = {self._normalize_char(ch) for ch in chord.allowed_chars}
+            for vk, ch in pressed_chars.items():
+                if self._normalize_char(ch) in allowed_chars:
+                    out.add(vk)
+            return sorted(out)
 
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         with self._lock:
@@ -658,6 +786,7 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 self._caps_on = not self._caps_on
 
             pressed_vks = self._get_pressed_for_policy(state, inj=inj)
+            held_vks = self._get_held_for_policy(state)
             shift, ctrl, alt, altgr = self._mods_from_pressed(pressed_vks)
             layout = self._translator.current_layout()
             event_scan_code = int(getattr(event, "scanCode", 0) or 0)
@@ -704,6 +833,18 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 event_scan_code=event_scan_code,
                 event_flags=event_flags,
             )
+            held_shift, held_ctrl, held_alt, held_altgr = self._mods_from_pressed(held_vks)
+            held_chars = self._compute_pressed_chars_snapshot(
+                held_vks,
+                layout=layout,
+                shift=held_shift,
+                ctrl=held_ctrl,
+                alt=held_alt,
+                altgr=held_altgr,
+                event_vk=vk_evt if (is_down and fresh_down) else None,
+                event_scan_code=event_scan_code,
+                event_flags=event_flags,
+            )
 
             opol = self.config.constraints.order_policy
             is_strict = opol in (OrderPolicy.STRICT, OrderPolicy.STRICT_RECOVERABLE)
@@ -711,8 +852,8 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
             if is_strict:
                 self._strict_order.on_event(
                     chord,
-                    pressed_vks,
-                    set(pressed_chars.values()),
+                    held_vks,
+                    set(held_chars.values()),
                     vk_evt=vk_evt,
                     event_char=event_char,
                     fresh_down=fresh_down,
@@ -721,7 +862,11 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 )
 
             prev_full = self._was_full
-            full = self._match_chord(chord, pressed_vks, pressed_chars)
+            event_match = self._match_chord(chord, pressed_vks, pressed_chars)
+            held_full = self._held_chord_full(
+                state, chord, layout=layout, inj=inj, event_match=event_match,
+            )
+            full = event_match
             if is_strict and full:
                 if not self._strict_order.allows_full(chord, pressed_vks, set(pressed_chars.values()), self._normalize_char, recoverable=is_recoverable):
                     if self._strict_order.invalid:
@@ -729,18 +874,27 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                     elif self._strict_order.attempt_invalid:
                         trace.skip("strict_order_attempt_invalid")
                     full = False
+            if is_strict and held_full:
+                if not self._strict_order.allows_full(chord, held_vks, set(held_chars.values()), self._normalize_char, recoverable=is_recoverable):
+                    held_full = False
 
-            if is_strict and full and not prev_full:
+            if is_strict and held_full and not prev_full:
                 self._strict_order.on_full_rising_edge(chord)
 
-            self._armed = full
-            if full:
+            self._armed = held_full
+            if held_full:
                 self._had_full = True
-            if full and not prev_full:
+            elif prev_full and self._required_groups_held(chord, held_vks, held_chars):
+                self._had_full = False
+                self._release_armed = False
+                self._click_down_ms = None
+                self._tap_count = 0
+                self._hold_token += 1
+            if held_full and not prev_full:
                 self._release_armed = True
                 trace.match("logical_chord_became_full", seq_index=self._seq_index)
 
-            any_chord_key_pressed = self._any_chord_key_pressed(chord, pressed_vks, pressed_chars)
+            any_chord_key_pressed = self._any_chord_key_pressed(chord, held_vks, held_chars)
             event_targets_this_bind = (vk_evt in chord.allowed_vk_union) or (self._normalize_char(event_char) in {self._normalize_char(ch) for ch in chord.allowed_chars} if event_char is not None else False)
             diagnostic_relevant = (
                 full or prev_full or self._had_full or self._release_armed or any_chord_key_pressed or (self._seq_index > 0)
@@ -850,7 +1004,7 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                         self._seq_index += 1
                         self._strict_order.reset()
 
-                self._was_full = full
+                self._was_full = held_full
                 if not any_chord_key_pressed:
                     self._had_full = False
                     self._release_armed = False
@@ -985,7 +1139,7 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                         trace.suppress("suppressed_when_matched", trigger=trig_name)
                         self._press_suppress_vk = vk_evt
 
-            if trig in (Trigger.ON_HOLD, Trigger.ON_REPEAT) and prev_full and not full:
+            if trig in (Trigger.ON_HOLD, Trigger.ON_REPEAT) and prev_full and not held_full:
                 self._hold_token += 1
 
             if not any_chord_key_pressed:
@@ -993,7 +1147,7 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                 self._release_armed = False
                 self._strict_order.reset()
 
-            self._was_full = full
+            self._was_full = held_full
             return flags
 
 

@@ -318,6 +318,54 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 return False
         return True
 
+    def _required_groups_held(self, chord: _ChordSpec, held: Set[int]) -> bool:
+        for g in chord.groups:
+            if not (held & set(g)):
+                return False
+        return True
+
+    def _held_chord_full(
+        self,
+        state: InputState,
+        chord: _ChordSpec,
+        *,
+        inj: bool = False,
+        event_match: Optional[bool] = None,
+    ) -> bool:
+        """Whether the chord is fully held, applying chord_policy per input domain.
+
+        If ``event_match`` is the already computed ``_match_chord`` result for
+        the event domain, a second match runs only when the other domain can
+        still complete the chord.
+        """
+        pol = self.config.injected
+        injected = state.pressed_keys_injected or ()
+        if pol == InjectedPolicy.IGNORE:
+            if event_match is not None and not inj:
+                return event_match
+            return self._match_chord(chord, set(state.pressed_keys))
+        if pol == InjectedPolicy.ONLY:
+            if event_match is not None and inj:
+                return event_match
+            return self._match_chord(chord, set(injected))
+        if not inj:
+            if event_match:
+                return True
+            if event_match is False and not injected:
+                return False
+            if event_match is None and self._match_chord(chord, set(state.pressed_keys)):
+                return True
+            if not injected:
+                return False
+            phys_mods = {vk for vk in state.pressed_keys if is_modifier_vk(vk)}
+            return self._match_chord(chord, set(injected) | phys_mods)
+        if self._match_chord(chord, set(state.pressed_keys)):
+            return True
+        if event_match is not None:
+            return event_match
+        phys_mods = {vk for vk in state.pressed_keys if is_modifier_vk(vk)}
+        return self._match_chord(chord, set(injected) | phys_mods)
+
     def _get_pressed_for_policy(self, state: InputState, *, inj: bool) -> Set[int]:
         pol = self.config.injected
 
@@ -335,11 +383,45 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
         return set(state.pressed_keys)
 
+    def _get_held_for_policy(self, state: InputState) -> Set[int]:
+        """Keys that currently count as held for this bind, across input domains.
+
+        Matching still uses ``_get_pressed_for_policy`` so an injected event does
+        not pretend physical non-modifier keys belong to the injected chord.
+        Lifecycle (release arming, hold cancel, is_pressed) must not drop a
+        physically held chord key just because a synthetic event arrived.
+        """
+        pol = self.config.injected
+        if pol == InjectedPolicy.IGNORE:
+            return set(state.pressed_keys)
+        if pol == InjectedPolicy.ONLY:
+            return set(state.pressed_keys_injected or ())
+        return set(state.pressed_keys) | set(state.pressed_keys_injected or ())
+
     def _get_pressed_now(self, state: InputState) -> Set[int]:
-        injected_now = bool(state.pressed_keys_injected)
-        return self._get_pressed_for_policy(state, inj=injected_now)
+        return self._get_held_for_policy(state)
 
     def is_pressed(self) -> bool:
+        """True if the full chord of the current step is currently held."""
+        from ._backend import _GlobalBackend
+
+        with self._lock:
+            if not self._window_ok(force=True):
+                return False
+            state = _GlobalBackend.instance().current_state_snapshot()
+            chord = self.steps[self._seq_index]
+            if not self._held_chord_full(state, chord):
+                return False
+
+            opol = self.config.constraints.order_policy
+            if opol.name.startswith("STRICT"):
+                recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
+                held = self._get_held_for_policy(state)
+                return self._strict_order.allows_full(chord, held, recoverable=recoverable)
+            return True
+
+    def any_pressed(self) -> bool:
+        """True if any key belonging to the current chord step is currently held."""
         from ._backend import _GlobalBackend
 
         with self._lock:
@@ -348,15 +430,19 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             state = _GlobalBackend.instance().current_state_snapshot()
             chord = self.steps[self._seq_index]
             pressed = self._get_pressed_now(state)
-            full = self._match_chord(chord, pressed)
-            if not full:
-                return False
+            return bool(pressed & set(chord.allowed_union))
 
-            opol = self.config.constraints.order_policy
-            if opol.name.startswith("STRICT"):
-                recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
-                return self._strict_order.allows_full(chord, pressed, recoverable=recoverable)
-            return True
+    def pressed_keys(self):
+        """Sorted list of VK codes from this bind that are currently held."""
+        from ._backend import _GlobalBackend
+
+        with self._lock:
+            if not self._window_ok(force=True):
+                return []
+            state = _GlobalBackend.instance().current_state_snapshot()
+            chord = self.steps[self._seq_index]
+            pressed = self._get_pressed_now(state)
+            return sorted(pressed & set(chord.allowed_union))
 
     def handle(self, event: winput.KeyboardEvent, state: InputState) -> int:
         # Keep hook path tiny: avoid heavy work unless needed.
@@ -391,6 +477,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
 
             chord = self.steps[self._seq_index]
             pressed = self._get_pressed_for_policy(state, inj=inj)
+            held = self._get_held_for_policy(state)
 
             vk_evt = int(event.vkCode)
             is_down = event.action in (WM_KEYDOWN, WM_SYSKEYDOWN)
@@ -403,9 +490,10 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             is_recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
 
             if is_strict:
+                # Use held, not event-domain pressed: injected extras would look like a full chord release to STRICT.
                 self._strict_order.on_event(
                     chord,
-                    pressed,
+                    held,
                     vk_evt=vk_evt,
                     is_up=is_up,
                     fresh_down=fresh_down,
@@ -413,7 +501,9 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 )
 
             prev_full = self._was_full
-            full = self._match_chord(chord, pressed)
+            event_match = self._match_chord(chord, pressed)
+            held_full = self._held_chord_full(state, chord, inj=inj, event_match=event_match)
+            full = event_match
             if is_strict and full:
                 if not self._strict_order.allows_full(chord, pressed, recoverable=is_recoverable):
                     if self._strict_order.invalid:
@@ -421,25 +511,33 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                     elif self._strict_order.attempt_invalid:
                         trace.skip("strict_order_attempt_invalid")
                     full = False
+            if is_strict and held_full:
+                if not self._strict_order.allows_full(chord, held, recoverable=is_recoverable):
+                    held_full = False
 
-            if is_strict and full and not prev_full:
+            if is_strict and held_full and not prev_full:
                 self._strict_order.on_full_rising_edge(chord)
 
-            self._armed = full
+            self._armed = held_full
 
-            # Track activation cycle: once chord was fully pressed.
-            if full:
+            if held_full:
                 self._had_full = True
+            elif prev_full and self._required_groups_held(chord, held):
+                # Required keys still down, but extras / order made the chord
+                # invalid (e.g. F1 then G). Drop the press/release cycle.
+                self._had_full = False
+                self._release_armed = False
+                self._click_down_ms = None
+                self._tap_count = 0
+                self._hold_token += 1
 
-            # Rearm ON_RELEASE every time chord becomes full (not_full -> full).
-            if full and not prev_full:
+            if held_full and not prev_full:
                 self._release_armed = True
                 trace.match("chord_became_full", seq_index=self._seq_index)
 
-            # Is any chord key still held?
             any_chord_key_pressed = False
             for vk in chord.allowed_union:
-                if vk in pressed:
+                if vk in held:
                     any_chord_key_pressed = True
                     break
 
@@ -587,7 +685,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                         self._seq_index += 1
                         self._strict_order.reset()
 
-                self._was_full = full
+                self._was_full = held_full
                 if not any_chord_key_pressed:
                     self._had_full = False
                     self._release_armed = False
@@ -746,7 +844,7 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                         trace.suppress("suppressed_when_matched", trigger=trig_name)
                         self._press_suppress_vk = vk_evt
 
-            if trig in (Trigger.ON_HOLD, Trigger.ON_REPEAT) and prev_full and not full:
+            if trig in (Trigger.ON_HOLD, Trigger.ON_REPEAT) and prev_full and not held_full:
                 self._hold_token += 1
 
             # end cycle if fully released
@@ -755,5 +853,5 @@ class Bind(BaseBind[winput.KeyboardEvent]):
                 self._release_armed = False
                 self._strict_order.reset()
 
-            self._was_full = full
+            self._was_full = held_full
             return flags
