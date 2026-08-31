@@ -103,6 +103,47 @@ def test_keyboard_bind_is_pressed_prefers_policy_aware_snapshot(runtime_env):
     assert bind.is_pressed() is False
 
 
+def test_keyboard_bind_is_pressed_keeps_physical_key_when_other_key_injected(runtime_env):
+    hook = runtime_env.make_hook(auto_start=False)
+    bind = hook.bind("f1", lambda: None)
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    runtime_env.backend_singleton.current_state_snapshot = driver._state
+
+    driver.key(runtime_env.winput.VK_F1, "down")
+    assert bind.is_pressed() is True
+    assert bind.any_pressed() is True
+    assert runtime_env.winput.VK_F1 in bind.pressed_keys()
+
+    driver.key(ord("1"), "down", injected=True)
+    assert bind.is_pressed() is True
+    assert bind.any_pressed() is True
+    assert runtime_env.winput.VK_F1 in bind.pressed_keys()
+
+
+def test_keyboard_bind_is_pressed_respects_extra_physical_keys(runtime_env):
+    hook = runtime_env.make_hook(auto_start=False)
+    bind = hook.bind("f1", lambda: None)
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    runtime_env.backend_singleton.current_state_snapshot = driver._state
+
+    driver.key(ord("G"), "down")
+    driver.key(runtime_env.winput.VK_F1, "down")
+    assert bind.is_pressed() is False
+    assert bind.any_pressed() is True
+
+
+def test_mouse_bind_is_pressed_keeps_physical_button_when_other_button_injected(runtime_env):
+    hook = runtime_env.make_hook(auto_start=False)
+    bind = hook.bind_mouse("left", lambda: None)
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    runtime_env.backend_singleton.current_state_snapshot = driver._state
+
+    driver.mouse("left", "down")
+    assert bind.is_pressed() is True
+    driver.mouse("right", "down", injected=True)
+    assert bind.is_pressed() is True
+
+
 def test_mouse_bind_is_pressed_prefers_policy_aware_snapshot(runtime_env):
     hook = runtime_env.make_hook(auto_start=False)
     bind = hook.bind_mouse("left", lambda: None)

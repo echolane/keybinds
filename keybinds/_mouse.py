@@ -104,15 +104,32 @@ class MouseBind(BaseBind[winput.MouseEvent]):
             return set(state.pressed_mouse_injected or ())
         return set(state.pressed_mouse)
 
+    def _get_held_for_policy(self, state: InputState) -> set[MouseButton]:
+        pol = self.config.injected
+        if pol == InjectedPolicy.IGNORE:
+            return set(state.pressed_mouse)
+        if pol == InjectedPolicy.ONLY:
+            return set(state.pressed_mouse_injected or ())
+        return set(state.pressed_mouse) | set(state.pressed_mouse_injected or ())
+
     def is_pressed(self) -> bool:
+        """True if this mouse button is currently held."""
         from ._backend import _GlobalBackend
 
         with self._lock:
             if not self._window_ok(force=True):
                 return False
             state = _GlobalBackend.instance().current_state_snapshot()
-            pressed = self._get_pressed_for_policy(state, inj=bool(state.pressed_mouse_injected))
+            pressed = self._get_held_for_policy(state)
             return self.button in pressed
+
+    def any_pressed(self) -> bool:
+        """Same as is_pressed() for a single mouse button bind."""
+        return self.is_pressed()
+
+    def pressed_keys(self):
+        """List containing the button if it is currently held, else empty."""
+        return [self.button] if self.is_pressed() else []
 
     def handle(self, event: winput.MouseEvent, state: InputState) -> int:
         # Mouse move/wheel is extremely frequent; this is called only after Hook filtered.

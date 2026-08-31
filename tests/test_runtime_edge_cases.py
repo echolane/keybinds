@@ -123,6 +123,124 @@ def test_hook_bind_chord_policy_relaxed_accepts_extra_non_modifier(runtime_env):
     assert hits == ['relaxed']
 
 
+def test_on_release_survives_foreign_injected_keydown(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind('f1', lambda: hits.append('press'))
+    hook.bind('f1', lambda: hits.append('release'), config=BindConfig(trigger=Trigger.ON_RELEASE))
+
+    driver.key(runtime_env.winput.VK_F1, 'down')
+    driver.key(ord('1'), 'down', injected=True)
+    driver.key(runtime_env.winput.VK_F1, 'up')
+
+    assert _wait_until(lambda: hits == ['press', 'release'])
+    assert hits == ['press', 'release']
+
+
+def test_on_release_does_not_arm_when_extra_physical_key_blocks_chord(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind('f1', lambda: hits.append('press'))
+    hook.bind('f1', lambda: hits.append('release'), config=BindConfig(trigger=Trigger.ON_RELEASE))
+
+    driver.key(ord('G'), 'down')
+    driver.key(runtime_env.winput.VK_F1, 'down')
+    driver.key(runtime_env.winput.VK_F1, 'up')
+    driver.key(ord('G'), 'up')
+
+    assert _wait_until(lambda: 'press' not in hits and 'release' not in hits, timeout=0.2)
+    assert hits == []
+
+
+def test_on_release_cancels_when_extra_physical_key_arrives_after_full(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind('f1', lambda: hits.append('press'))
+    hook.bind('f1', lambda: hits.append('release'), config=BindConfig(trigger=Trigger.ON_RELEASE))
+
+    driver.key(runtime_env.winput.VK_F1, 'down')
+    driver.key(ord('G'), 'down')
+    driver.key(runtime_env.winput.VK_F1, 'up')
+    driver.key(ord('G'), 'up')
+
+    assert _wait_until(lambda: hits == ['press'], timeout=0.2)
+    assert hits == ['press']
+
+
+def test_on_release_still_fires_when_releasing_one_key_of_real_chord(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind('ctrl+f1', lambda: hits.append('press'))
+    hook.bind('ctrl+f1', lambda: hits.append('release'), config=BindConfig(trigger=Trigger.ON_RELEASE))
+
+    driver.key(runtime_env.winput.VK_CONTROL, 'down')
+    driver.key(runtime_env.winput.VK_F1, 'down')
+    driver.key(runtime_env.winput.VK_CONTROL, 'up')
+
+    assert _wait_until(lambda: hits == ['press', 'release'])
+    assert hits == ['press', 'release']
+
+
+def test_on_release_arms_with_extra_physical_key_when_relaxed(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Trigger = runtime_env.types.Trigger
+    Constraints = runtime_env.types.Constraints
+    ChordPolicy = runtime_env.types.ChordPolicy
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+    relaxed = Constraints(chord_policy=ChordPolicy.RELAXED)
+    hook.bind('f1', lambda: hits.append('press'), config=BindConfig(constraints=relaxed))
+    hook.bind('f1', lambda: hits.append('release'), config=BindConfig(trigger=Trigger.ON_RELEASE, constraints=relaxed))
+
+    driver.key(ord('G'), 'down')
+    driver.key(runtime_env.winput.VK_F1, 'down')
+    driver.key(runtime_env.winput.VK_F1, 'up')
+
+    assert _wait_until(lambda: hits == ['press', 'release'])
+    assert hits == ['press', 'release']
+
+
+def test_logical_on_release_survives_foreign_injected_keydown(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+
+    hook.bind_logical('a', lambda: hits.append('press'))
+    hook.bind_logical('a', lambda: hits.append('release'), config=BindConfig(trigger=Trigger.ON_RELEASE))
+
+    driver.key(ord('A'), 'down')
+    driver.key(ord('1'), 'down', injected=True)
+    driver.key(ord('A'), 'up')
+
+    assert _wait_until(lambda: hits == ['press', 'release'])
+    assert hits == ['press', 'release']
+
+
 def test_hook_keyboard_injected_policy_ignore_and_only_runtime(runtime_env):
     BindConfig = runtime_env.types.BindConfig
     InjectedPolicy = runtime_env.types.InjectedPolicy

@@ -94,7 +94,20 @@ class BaseBind(Generic[E]):
         pass
 
     def is_pressed(self) -> bool:
+        """True if the bind is currently fully active (full chord / button held)."""
         return False
+
+    def any_pressed(self) -> bool:
+        """True if any key/button belonging to this bind is currently held."""
+        return False
+
+    def pressed_keys(self):
+        """Return the currently pressed keys/buttons that belong to this bind.
+
+        For keyboard binds: sorted list of VK codes.
+        For mouse binds: list of MouseButton.
+        """
+        return []
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         with self._fire_wait:

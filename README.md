@@ -144,17 +144,25 @@ Top-level helpers use the default hook. If you use multiple hooks, prefer `hook.
 
 ## Bind state and waiting
 
-All bind objects expose two small runtime helpers:
+All bind objects expose small runtime helpers:
 
 ```python
 if bind.is_pressed():
-    print("bind is currently active")
+    print("full chord is currently held")
+
+if bind.any_pressed():
+    print("at least one key/button of this bind is held")
+
+print(bind.pressed_keys())  # held VKs for this bind, or [button] for mouse
 
 bind.wait()          # wait until the bind fires
 bind.wait(0.5)       # wait up to 0.5s, returns True/False
 ```
 
-`is_pressed()` checks whether the bind is currently pressed.
+`is_pressed()` is true only when the current chord step is fully held (same `ChordPolicy` / `InjectedPolicy` rules as matching).
+`any_pressed()` is true if any key or button belonging to that step is held.
+`pressed_keys()` returns those held keys: sorted VK codes for keyboard/logical binds, or `[button]` / `[]` for mouse.
+Text-sequence and abbreviation binds: `any_pressed()` follows buffer/pending match; `pressed_keys()` returns `[]`.
 `wait(timeout=None)` blocks until the bind fires and returns `True`, or returns `False` on timeout.
 
 ---
