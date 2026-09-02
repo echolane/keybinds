@@ -159,11 +159,10 @@ bind.wait()          # wait until the bind fires
 bind.wait(0.5)       # wait up to 0.5s, returns True/False
 ```
 
-`is_pressed()` is true only when the current chord step is fully held (same `ChordPolicy` / `InjectedPolicy` rules as matching).
-`any_pressed()` is true if any key or button belonging to that step is held.
-`pressed_keys()` returns those held keys: sorted VK codes for keyboard/logical binds, or `[button]` / `[]` for mouse.
-Text-sequence and abbreviation binds: `any_pressed()` follows buffer/pending match; `pressed_keys()` returns `[]`.
-`wait(timeout=None)` blocks until the bind fires and returns `True`, or returns `False` on timeout.
+- `is_pressed()` — the full chord is held.  
+- `any_pressed()` — any key/button of this bind is held.  
+- `pressed_keys()` — those keys (VKs, or the mouse button).  
+- `wait(timeout=None)` — block until the bind fires (`False` on timeout).
 
 ---
 

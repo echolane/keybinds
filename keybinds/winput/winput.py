@@ -544,13 +544,19 @@ def get_message() -> bool: # get pending messages
 def stop() -> None: # stop message loop
     user32.PostQuitMessage(0)
 
-def unhook_mouse() -> None: # remove hook from mouse event queue
-    global mouse_hook
-    user32.UnhookWindowsHookEx(mouse_hook)
+def unhook_mouse() -> None:
+    global mouse_hook, mouse_hook_func
+    if mouse_hook:
+        user32.UnhookWindowsHookEx(mouse_hook)
+    mouse_hook = None
+    mouse_hook_func = None
 
-def unhook_keyboard() -> None: # remove hook from keyboard event queue
-    global keyboard_hook
-    user32.UnhookWindowsHookEx(keyboard_hook)
+def unhook_keyboard() -> None:
+    global keyboard_hook, keyboard_hook_func
+    if keyboard_hook:
+        user32.UnhookWindowsHookEx(keyboard_hook)
+    keyboard_hook = None
+    keyboard_hook_func = None
 
 def set_DPI_aware(per_monitor : bool = True) -> None: # make this process DPI aware
     shcore = ctypes.windll.shcore

@@ -490,7 +490,9 @@ class Bind(BaseBind[winput.KeyboardEvent]):
             is_recoverable = (opol == OrderPolicy.STRICT_RECOVERABLE)
 
             if is_strict:
-                # Use held, not event-domain pressed: injected extras would look like a full chord release to STRICT.
+                # Order tracker must see keys still held in other domains.
+                # Event-domain `pressed` on an injected extra key looks like
+                # "all physical chord keys released" and poisons STRICT state.
                 self._strict_order.on_event(
                     chord,
                     held,

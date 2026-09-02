@@ -1,6 +1,7 @@
 # keybinds/_backend.py
 from __future__ import annotations
 
+import atexit
 import threading
 import weakref
 from traceback import print_exc
@@ -54,6 +55,8 @@ class _GlobalBackend:
         self._thread_id: Optional[int] = None
         self._thread_ready = threading.Event()
         self._state_lock = threading.RLock()
+        self._atexit_registered = False
+        self._shutdown_lock = threading.Lock()
 
     @classmethod
     def instance(cls) -> _GlobalBackend:
@@ -75,14 +78,20 @@ class _GlobalBackend:
                 stop_dispatcher()
             except Exception:
                 pass
+            try:
+                if not self._alive_hooks():
+                    self.shutdown()
+            except Exception:
+                pass
 
         with self._hooks_lock:
             self._hooks.append(weakref.ref(hook_obj, _on_hook_gc))
 
+        self._ensure_atexit()
         self._ensure_thread()
 
     def unregister(self, hook_obj) -> None:
-        """Unregister a Hook frontend."""
+        """Unregister a Hook frontend. Last hook tears down the backend."""
         with self._hooks_lock:
             new_list = []
             for r in self._hooks:
@@ -93,6 +102,42 @@ class _GlobalBackend:
                     continue
                 new_list.append(r)
             self._hooks = new_list
+            remaining = bool(new_list)
+        if not remaining:
+            self.shutdown()
+
+    def _ensure_atexit(self) -> None:
+        if self._atexit_registered:
+            return
+        atexit.register(_atexit_shutdown_backend)
+        self._atexit_registered = True
+
+    def shutdown(self) -> None:
+        """Remove LL hooks and ask the backend thread to exit. Idempotent.
+
+        Does not join the backend thread: Unhook already frees the input chain.
+        """
+        with self._shutdown_lock:
+            with self._hooks_lock:
+                thread_id = self._thread_id
+
+            self._unhook_now()
+
+            if thread_id is not None:
+                try:
+                    winput.post_thread_message(thread_id, winput.WM_QUIT, 0, 0)
+                except Exception:
+                    pass
+
+    def _unhook_now(self) -> None:
+        try:
+            winput.unhook_keyboard()
+        except Exception:
+            pass
+        try:
+            winput.unhook_mouse()
+        except Exception:
+            pass
 
     def reinstall_hooks(self) -> None:
         if not self._thread_started:
@@ -136,7 +181,8 @@ class _GlobalBackend:
 
     def _ensure_thread(self) -> None:
         with self._hooks_lock:
-            if self._thread_started:
+            t = self._thread
+            if t is not None and t.is_alive():
                 return
             self._thread_started = True
 
@@ -147,15 +193,7 @@ class _GlobalBackend:
 
     def _on_backend_message(self, msg) -> bool:
         if int(msg.message) == WM_KEYBINDS_REINSTALL:
-            try:
-                winput.unhook_keyboard()
-            except Exception:
-                pass
-            try:
-                winput.unhook_mouse()
-            except Exception:
-                pass
-
+            self._unhook_now()
             self._clear_pressed_state()
             self._reset_all_hook_runtime_states()
 
@@ -179,15 +217,7 @@ class _GlobalBackend:
         except Exception:
             print_exc()
         finally:
-            try:
-                winput.unhook_keyboard()
-            except Exception:
-                pass
-            try:
-                winput.unhook_mouse()
-            except Exception:
-                pass
-
+            self._unhook_now()
             self._clear_pressed_state()
             with self._hooks_lock:
                 self._thread_started = False
@@ -325,6 +355,16 @@ class _GlobalBackend:
             except Exception:
                 print_exc()
         return flags
+
+
+def _atexit_shutdown_backend() -> None:
+    inst = _GlobalBackend._instance
+    if inst is None:
+        return
+    try:
+        inst.shutdown()
+    except Exception:
+        pass
 
 
 def reinstall_hooks() -> None:
