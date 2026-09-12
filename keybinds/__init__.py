@@ -21,6 +21,8 @@ from .types import (
     Checks,
     BindConfig,
     MouseButton,
+    WHEEL_BUTTONS,
+    is_wheel_button,
     MouseBindConfig,
     LogicalConfig,
     Callback,
@@ -36,12 +38,12 @@ from ._backend import reinstall_hooks, rehook
 
 from ._constants import register_key_token
 
-__version__ = "1.3.4"
+__version__ = "1.3.5"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy","TextBoundaryPolicy","TextBackspacePolicy","OsKeyRepeatPolicy","ReplacementPolicy",
     "Timing","Constraints","Checks","BindConfig",
-    "MouseButton","MouseBindConfig","Callback","Predicate","LogicalConfig",
+    "MouseButton","WHEEL_BUTTONS","is_wheel_button","MouseBindConfig","Callback","Predicate","LogicalConfig",
     "Bind","LogicalBind","TextAbbreviationBind","KeyboardBind","MouseBind","Hook","get_default_hook","set_default_hook","join","unbind",
     "bind_key","bind_logical","bind_text","add_abbreviation","bind_abbreviation","bind_mouse","presets","register_key_token","winput",
     "reinstall_hooks","rehook"

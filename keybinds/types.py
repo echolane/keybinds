@@ -203,6 +203,22 @@ class MouseButton(Enum):
     MIDDLE = auto()
     X1 = auto()
     X2 = auto()
+    WHEEL_UP = auto()
+    WHEEL_DOWN = auto()
+    WHEEL_LEFT = auto()
+    WHEEL_RIGHT = auto()
+
+
+WHEEL_BUTTONS = frozenset({
+    MouseButton.WHEEL_UP,
+    MouseButton.WHEEL_DOWN,
+    MouseButton.WHEEL_LEFT,
+    MouseButton.WHEEL_RIGHT,
+})
+
+
+def is_wheel_button(button: MouseButton) -> bool:
+    return button in WHEEL_BUTTONS
 
 
 @dataclass(frozen=True)
@@ -216,9 +232,15 @@ class MouseBindConfig:
     timing: Timing = field(default_factory=Timing)
     constraints: Constraints = field(default_factory=Constraints)
     checks: Checks = field(default_factory=Checks)
+    # Units accumulated before one wheel callback. Win32 notch is 120.
+    wheel_delta: int = 120
 
     def __post_init__(self):
         object.__setattr__(self, "checks", Checks.coerce(self.checks))
+        delta = int(self.wheel_delta)
+        if delta < 1:
+            raise ValueError("wheel_delta must be >= 1")
+        object.__setattr__(self, "wheel_delta", delta)
 
     def soft_merge(self, patch: MouseBindConfig) -> MouseBindConfig:
         """Apply only non-default fields from `patch` (patch semantics)."""
@@ -327,6 +349,9 @@ def _merge_soft(lhs: TBind, rhs: TBind) -> TBind:
 
     if rhs.focus != default_bind.focus:
         out = replace(out, focus=rhs.focus)
+
+    if isinstance(out, MouseBindConfig) and rhs.wheel_delta != default_bind.wheel_delta:
+        out = replace(out, wheel_delta=rhs.wheel_delta)
 
     out = replace(out, timing=_merge_dc_soft(out.timing, rhs.timing, _DEFAULT_TIMING))
     out = replace(out, constraints=_merge_dc_soft(out.constraints, rhs.constraints, _DEFAULT_CONSTRAINTS))

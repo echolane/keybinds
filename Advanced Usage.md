@@ -47,7 +47,7 @@ Typical cases:
 For non-trivial applications, it is usually better to keep an explicit `Hook` object rather than relying only on the default hook.
 
 ```python
-from keybinds.bind import Hook
+from keybinds import Hook
 
 hook = Hook()
 hook.bind("ctrl+e", lambda: print("Inventory"))
@@ -62,7 +62,7 @@ Using your own hook gives you explicit control over:
 ### Manual start
 
 ```python
-from keybinds.bind import Hook
+from keybinds import Hook
 
 hook = Hook(auto_start=False)
 hook.bind("f1", lambda: print("hello"))
@@ -74,7 +74,7 @@ hook.join()
 ### Context manager
 
 ```python
-from keybinds.bind import Hook
+from keybinds import Hook
 
 with Hook() as hook:
     hook.bind("esc", hook.stop)
@@ -185,7 +185,7 @@ Decorators attach created bind handles to the function.
 This applies to keyboard, mouse, logical, text, and abbreviation decorators.
 
 ```python
-from keybinds.decorators import bind_key, bind_mouse
+from keybinds import bind_key, bind_mouse
 
 @bind_key(["ctrl+a", "ctrl+b"], hook=hook)
 @bind_mouse(["left", "right"], hook=hook)
@@ -277,7 +277,7 @@ For a single chord such as `ctrl+e`:
 - `ON_CHORD_COMPLETE` fires only on the transition from not-full to full
 
 ```python
-from keybinds.types import BindConfig, Trigger
+from keybinds import BindConfig, Trigger
 
 hook.bind(
     "ctrl+e",
@@ -299,7 +299,7 @@ For chords:
 For sequence expressions, the most readable trigger is usually `Trigger.ON_SEQUENCE`.
 
 ```python
-from keybinds.types import BindConfig, Trigger, Timing
+from keybinds import BindConfig, Trigger, Timing
 
 hook.bind(
     "g,k,i",
@@ -332,7 +332,7 @@ This is usually the best UX default.
 Requires exact chord membership (except keys explicitly ignored via `ignore_keys`).
 
 ```python
-from keybinds.types import BindConfig, Constraints, ChordPolicy
+from keybinds import BindConfig, Constraints, ChordPolicy
 
 cfg = BindConfig(
     constraints=Constraints(chord_policy=ChordPolicy.STRICT)
@@ -351,8 +351,7 @@ Only checks that required groups are present; extra keys are tolerated.
 In strict mode, allow specific extra VK codes to be ignored.
 
 ```python
-from keybinds import winput
-from keybinds.types import BindConfig, Constraints, ChordPolicy
+from keybinds import winput, BindConfig, Constraints, ChordPolicy
 
 cfg = BindConfig(
     constraints=Constraints(
@@ -376,7 +375,7 @@ Controls whether chord keys must be pressed in the defined order.
 Applies only to keyboard chords.
 
 ```python
-from keybinds.types import BindConfig, Constraints, OrderPolicy
+from keybinds import BindConfig, Constraints, OrderPolicy
 
 hook.bind(
     "ctrl+shift+x",
@@ -404,7 +403,7 @@ Whether OS-generated repeated **keydown** events (while a key is held) are treat
 * `True` — allow OS key-repeat (e.g., `ON_PRESS` may fire repeatedly).
 
 ```python
-from keybinds.types import BindConfig, Constraints
+from keybinds import BindConfig, Constraints
 
 cfg = BindConfig(constraints=Constraints(allow_os_key_repeat=True))
 hook.bind("g", lambda: print("repeat!"), config=cfg)
@@ -417,7 +416,7 @@ hook.bind("g", lambda: print("repeat!"), config=cfg)
 Cap how many times a bind can fire in its lifetime.
 
 ```python
-from keybinds.types import BindConfig, Constraints
+from keybinds import BindConfig, Constraints
 
 cfg = BindConfig(constraints=Constraints(max_fires=1))
 hook.bind("f12", lambda: print("one-shot"), config=cfg)
@@ -434,7 +433,7 @@ Use this for:
 ## Timing knobs (advanced notes)
 
 ```python
-from keybinds.types import Timing
+from keybinds import Timing
 
 Timing(
     hold_ms=400,
@@ -518,7 +517,7 @@ These policies are orthogonal:
 - `FocusPolicy` → blur behavior for window-scoped binds
 
 ```python
-from keybinds.types import (
+from keybinds import (
     BindConfig,
     Constraints,
     SuppressPolicy,
@@ -557,7 +556,7 @@ hook.bind("ctrl+e", callback, hwnd=target_hwnd)
 `Timing.window_focus_cache_ms` controls how often the active-window check is refreshed.
 
 ```python
-from keybinds.types import BindConfig, Timing
+from keybinds import BindConfig, Timing
 
 cfg = BindConfig(timing=Timing(window_focus_cache_ms=25))
 hook.bind("ctrl+e", callback, config=cfg, hwnd=target_hwnd)

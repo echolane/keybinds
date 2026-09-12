@@ -6,12 +6,22 @@ from typing import Callable, Optional, Union, Tuple
 
 from . import winput
 
-from .types import Callback, MouseBindConfig, MouseButton, SuppressPolicy, InjectedPolicy, Trigger
+from .types import (
+    Callback,
+    MouseBindConfig,
+    MouseButton,
+    SuppressPolicy,
+    InjectedPolicy,
+    Trigger,
+    is_wheel_button,
+)
 from ._constants import (
     WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_RBUTTONDOWN, WM_RBUTTONUP,
     WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
+    WM_MOUSEWHEEL, WM_MOUSEHWHEEL,
+    MOUSE_WHEEL_ACTIONS,
 )
 from .diagnostics import _DiagnosticsManager, _EventTrace
 from ._base_bind import BaseBind
@@ -22,7 +32,7 @@ def _normalize_mouse_button(btn: object) -> MouseButton:
     if isinstance(btn, MouseButton):
         return btn
     if isinstance(btn, str):
-        s = btn.strip().lower()
+        s = btn.strip().lower().replace("-", "_")
         aliases = {
             "left": MouseButton.LEFT,
             "lmb": MouseButton.LEFT,
@@ -34,6 +44,20 @@ def _normalize_mouse_button(btn: object) -> MouseButton:
             "mouse4": MouseButton.X1,
             "x2": MouseButton.X2,
             "mouse5": MouseButton.X2,
+            "wheelup": MouseButton.WHEEL_UP,
+            "wheel_up": MouseButton.WHEEL_UP,
+            "scrollup": MouseButton.WHEEL_UP,
+            "scroll_up": MouseButton.WHEEL_UP,
+            "wheeldown": MouseButton.WHEEL_DOWN,
+            "wheel_down": MouseButton.WHEEL_DOWN,
+            "scrolldown": MouseButton.WHEEL_DOWN,
+            "scroll_down": MouseButton.WHEEL_DOWN,
+            "wheelleft": MouseButton.WHEEL_LEFT,
+            "wheel_left": MouseButton.WHEEL_LEFT,
+            "hwheel_left": MouseButton.WHEEL_LEFT,
+            "wheelright": MouseButton.WHEEL_RIGHT,
+            "wheel_right": MouseButton.WHEEL_RIGHT,
+            "hwheel_right": MouseButton.WHEEL_RIGHT,
         }
         if s in aliases:
             return aliases[s]
@@ -53,6 +77,11 @@ class MouseBind(BaseBind[winput.MouseEvent]):
     ) -> None:
         super().__init__(callback, config=config or MouseBindConfig(), hwnd=hwnd, dispatch=dispatch, diagnostics=diagnostics)
         self.button = _normalize_mouse_button(button)
+        if is_wheel_button(self.button) and self.config.trigger != Trigger.ON_PRESS:
+            raise ValueError(
+                f"mouse wheel bind {self.button.name.lower()!r} only supports "
+                f"Trigger.ON_PRESS, got {self.config.trigger!r}"
+            )
         self._set_diagnostics_identity(self.button.name.lower(), "mouse")
 
         self._down_ms: Optional[int] = None
@@ -60,6 +89,7 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         self._tap_count: int = 0
         self._tap_last_ms: int = 0
         self._armed: bool = False
+        self._wheel_acc: int = 0
 
     def _checks_ok(self, event: winput.MouseEvent, state: InputState, trace: Optional[_EventTrace] = None) -> bool:
         return super()._checks_ok(event, state, trace=trace)
@@ -86,6 +116,34 @@ class MouseBind(BaseBind[winput.MouseEvent]):
             return which == 2
         return True
 
+    def _wheel_contribution(self, event: winput.MouseEvent) -> Optional[int]:
+        """Return signed units toward this bind, 0 on same-axis reversal, None if unrelated."""
+        act = event.action
+        if act not in MOUSE_WHEEL_ACTIONS:
+            return None
+        try:
+            delta = int(getattr(event, "additional_data", 0) or 0)
+        except Exception:
+            delta = 0
+        if delta == 0:
+            return None
+
+        if act == WM_MOUSEWHEEL:
+            if self.button == MouseButton.WHEEL_UP:
+                return delta if delta > 0 else 0
+            if self.button == MouseButton.WHEEL_DOWN:
+                return -delta if delta < 0 else 0
+            return None
+
+        if act == WM_MOUSEHWHEEL:
+            if self.button == MouseButton.WHEEL_RIGHT:
+                return delta if delta > 0 else 0
+            if self.button == MouseButton.WHEEL_LEFT:
+                return -delta if delta < 0 else 0
+            return None
+
+        return None
+
     def reset(self) -> None:
         self._down_ms = None
         self._press_suppress_up = False
@@ -93,6 +151,60 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         self._tap_last_ms = 0
         self._hold_token += 1
         self._armed = False
+        self._wheel_acc = 0
+
+    def _handle_wheel(self, event: winput.MouseEvent, now_ms: int, trace: _EventTrace) -> int:
+        contrib = self._wheel_contribution(event)
+        if contrib is None:
+            return winput.WP_CONTINUE
+
+        if contrib == 0:
+            if self._wheel_acc:
+                trace.note("decision", "wheel_accumulator_reset", previous_acc=self._wheel_acc)
+            self._wheel_acc = 0
+            return winput.WP_CONTINUE
+
+        self._wheel_acc += contrib
+        quantum = int(self.config.wheel_delta)  # type: ignore
+        # too lazy to fix this typing issue now
+
+        fired = 0
+        flags = winput.WP_CONTINUE
+        sup = self.config.suppress
+        trig_name = self.config.trigger.name.lower()
+
+        trace.note(
+            "decision",
+            "wheel_tick",
+            button=self.button.name.lower(),
+            delta=contrib,
+            accumulated=self._wheel_acc,
+            quantum=quantum,
+        )
+
+        while self._wheel_acc >= quantum:
+            if not self.can_fire_now(now_ms, trace=trace):
+                break
+            self._wheel_acc -= quantum
+            self._fires += 1
+            self._last_fire_ms = now_ms
+            self._fire(trace.fire(trigger=trig_name))
+            fired += 1
+
+        if fired:
+            trace.note("decision", "wheel_notches_fired", notches=fired, remainder=self._wheel_acc)
+
+        if sup == SuppressPolicy.ALWAYS:
+            flags |= winput.WP_DONT_PASS_INPUT_ON
+            trace.suppress("suppressed_always")
+        elif fired and sup == SuppressPolicy.WHEN_MATCHED:
+            flags |= winput.WP_DONT_PASS_INPUT_ON
+            trace.suppress("suppressed_when_matched", trigger=trig_name)
+        elif fired and sup in (SuppressPolicy.WHILE_ACTIVE, SuppressPolicy.WHILE_EVALUATING):
+            flags |= winput.WP_DONT_PASS_INPUT_ON
+            trace.suppress("suppressed_while_active" if sup == SuppressPolicy.WHILE_ACTIVE else "suppressed_while_evaluating")
+
+        return flags
 
     def _get_pressed_for_policy(self, state: InputState, *, inj: bool) -> set[MouseButton]:
         pol = self.config.injected
@@ -132,7 +244,7 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         return [self.button] if self.is_pressed() else []
 
     def handle(self, event: winput.MouseEvent, state: InputState) -> int:
-        # Mouse move/wheel is extremely frequent; this is called only after Hook filtered.
+        # Move is filtered in the backend. Wheel and button events reach here.
         with self._lock:
             trace = self._trace(event)
             now_ms = int(event.time)
@@ -152,6 +264,9 @@ class MouseBind(BaseBind[winput.MouseEvent]):
             if pol == InjectedPolicy.ONLY and not inj:
                 trace.skip("injected_only_but_physical")
                 return winput.WP_CONTINUE
+
+            if is_wheel_button(self.button):
+                return self._handle_wheel(event, now_ms, trace)
 
             down_act, up_act = self._actions_for_button()
             is_down = event.action == down_act

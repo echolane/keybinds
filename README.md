@@ -5,14 +5,14 @@ Flexible global keyboard & mouse hotkeys for Windows.
 ![Python](https://img.shields.io/badge/python-3.7%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-maintenance-yellow)
+![Status](https://img.shields.io/badge/status-active-success)
 ![PyPI](https://img.shields.io/pypi/v/keybinds)
 
 **keybinds** is a Python library for global keyboard and mouse binds on Windows, with support for hotkeys, logical key binds, text matching, and text abbreviations.
 
 It supports:
 - global keyboard binds: single keys, chords (`ctrl+e`), and sequences (`g,k,i`)
-- global mouse binds: `left`, `right`, `middle`, `x1`, `x2`
+- global mouse binds: `left`, `right`, `middle`, `x1`, `x2`, `wheel_up`, `wheel_down`
 - rich triggers: press, release, click, hold, repeat, double tap, and sequence
 - suppression and injected-input policies
 - sync and async callbacks
@@ -58,7 +58,7 @@ Stable decorator helpers:
 
 ```python
 import keybinds
-from keybinds.decorators import bind_key, bind_mouse
+from keybinds import bind_key, bind_mouse
 
 @bind_key("ctrl+e")
 def inventory():
@@ -77,7 +77,7 @@ Decorators use the default hook automatically.
 
 ```python
 import keybinds
-from keybinds.decorators import bind_logical, bind_text, bind_abbreviation
+from keybinds import bind_logical, bind_text, bind_abbreviation
 
 # Experimental API: may change in future releases.
 
@@ -177,7 +177,7 @@ hook.bind("ctrl+e", lambda: print("Pressed"))
 ### Release
 
 ```python
-from keybinds.types import BindConfig, Trigger
+from keybinds import BindConfig, Trigger
 
 hook.bind(
     "ctrl+t",
@@ -189,7 +189,7 @@ hook.bind(
 ### Hold
 
 ```python
-from keybinds.types import BindConfig, Trigger, Timing
+from keybinds import BindConfig, Trigger, Timing
 
 hook.bind(
     "h",
@@ -204,7 +204,7 @@ hook.bind(
 ### Repeat (auto-fire while held)
 
 ```python
-from keybinds.types import BindConfig, Trigger, Timing
+from keybinds import BindConfig, Trigger, Timing
 
 hook.bind(
     "space",
@@ -219,7 +219,7 @@ hook.bind(
 ### Double tap
 
 ```python
-from keybinds.types import BindConfig, Trigger
+from keybinds import BindConfig, Trigger
 
 hook.bind(
     "g",
@@ -231,7 +231,7 @@ hook.bind(
 ### Sequence
 
 ```python
-from keybinds.types import BindConfig, Trigger
+from keybinds import BindConfig, Trigger
 
 hook.bind(
     "g,k,i",
@@ -245,7 +245,7 @@ hook.bind(
 ## Mouse Basics
 
 ```python
-from keybinds.types import MouseBindConfig, Trigger
+from keybinds import MouseBindConfig, Trigger
 
 hook.bind_mouse(
     "middle",
@@ -262,12 +262,28 @@ Mouse buttons:
 - `x1`
 - `x2`
 
+Mouse wheel (only `Trigger.ON_PRESS`):
+
+- `wheel_up` / `wheel_down`
+- `wheel_left` / `wheel_right` — horizontal (many mice never emit these)
+
+Wheel units accumulate until `MouseBindConfig.wheel_delta` (default `120`, the Win32 notch). Smaller wheel steps add up until they reach `wheel_delta`. Scrolling the other way clears the leftover amount.
+
+```python
+hook.bind_mouse("wheel_up", lambda: print("scroll up"))
+hook.bind_mouse(
+    "wheel_down",
+    lambda: print("scroll down"),
+    config=MouseBindConfig(wheel_delta=40),
+)
+```
+
 ---
 
 ## Suppression (block input from apps)
 
 ```python
-from keybinds.types import BindConfig, SuppressPolicy
+from keybinds import BindConfig, SuppressPolicy
 
 hook.bind(
     "ctrl+r",
@@ -291,7 +307,7 @@ Policies:
 Control how injected input (macros, `SendInput`, automation tools) is handled:
 
 ```python
-from keybinds.types import BindConfig, InjectedPolicy
+from keybinds import BindConfig, InjectedPolicy
 
 hook.bind(
     "f1",
@@ -311,7 +327,7 @@ Policies:
 ## Strict Chords
 
 ```python
-from keybinds.types import BindConfig, Constraints, ChordPolicy
+from keybinds import BindConfig, Constraints, ChordPolicy
 
 hook.bind(
     "ctrl+shift+u",
@@ -347,8 +363,7 @@ Callbacks may be `async def`. If a callback returns an awaitable, **keybinds** s
 
 ```python
 import asyncio
-from keybinds import Hook
-from keybinds.decorators import bind_key
+from keybinds import Hook, bind_key
 
 hook = Hook()
 

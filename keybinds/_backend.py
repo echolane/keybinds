@@ -15,6 +15,8 @@ from ._constants import (
     WM_RBUTTONDOWN, WM_RBUTTONUP,
     WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
+    MOUSE_BUTTON_ACTIONS,
+    MOUSE_WHEEL_ACTIONS,
 )
 from .types import MouseButton
 from ._state import InputState
@@ -291,14 +293,22 @@ class _GlobalBackend:
         return flags
 
     def _on_mouse(self, event: winput.MouseEvent) -> int:
-        # Hard filter: only handle button up/down (everything else is noise).
         act = event.action
-        if act not in (
-            WM_LBUTTONDOWN, WM_LBUTTONUP,
-            WM_RBUTTONDOWN, WM_RBUTTONUP,
-            WM_MBUTTONDOWN, WM_MBUTTONUP,
-            WM_XBUTTONDOWN, WM_XBUTTONUP,
-        ):
+
+        # Wheel is a pulse, not a pressed button. Dispatch without touching
+        # pressed_mouse so hold/is_pressed for real buttons stay correct.
+        if act in MOUSE_WHEEL_ACTIONS:
+            state = self.current_state_snapshot()
+            flags = winput.WP_CONTINUE
+            for h in self._alive_hooks():
+                try:
+                    flags |= h._handle_mouse_event(event, state)
+                except Exception:
+                    print_exc()
+            return flags
+
+        # Hard filter: only handle button up/down (move is noise).
+        if act not in MOUSE_BUTTON_ACTIONS:
             return winput.WP_CONTINUE
 
         injected = bool(getattr(event, "injected", False))

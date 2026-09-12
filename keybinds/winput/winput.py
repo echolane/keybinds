@@ -352,7 +352,9 @@ def _LowLevelMouseProc(nCode : int, wParam : int, lParam : int, cbfunc : Callabl
         extra_data = GET_HWORD(ms.mouseData)
         
     elif wParam == WM_MOUSEWHEEL or wParam == WM_MOUSEHWHEEL: # used scrollwheel
-        extra_data = GET_HWORD(ms.mouseData) // WHEEL_DELTA
+        # Raw signed HIWORD. WHEEL_DELTA (120) is the notch quantum at the bind layer;
+        # dividing here would drop high-res / touchpad packets smaller than 120.
+        extra_data = GET_HWORD(ms.mouseData)
 
     result = cbfunc(MouseEvent(
         (ms.pt.x, ms.pt.y),

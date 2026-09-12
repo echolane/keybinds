@@ -98,6 +98,7 @@ def _fake_winput() -> types.ModuleType:
         'WM_MOUSEMOVE': 0x0200,
         'WM_MOUSEWHEEL': 0x020A,
         'WM_MOUSEHWHEEL': 0x020E,
+        'WHEEL_DELTA': 120,
         'KEYEVENTF_KEYUP': 0x0002,
         'KEYEVENTF_UNICODE': 0x0004,
         'MAPVK_VK_TO_VSC': 0,
@@ -336,6 +337,18 @@ class HookDriver:
             time=timestamp,
             injected=injected,
             additional_data=additional_data,
+        )
+        return self.hook._handle_mouse_event(event, self._state())
+
+    def wheel(self, delta: int, *, horizontal: bool = False, dt: int | None = None, injected: bool = False):
+        timestamp = self._tick(dt)
+        msg = self.env.winput.WM_MOUSEHWHEEL if horizontal else self.env.winput.WM_MOUSEWHEEL
+        event = self.env.winput.MouseEvent(
+            action=msg,
+            time=timestamp,
+            injected=injected,
+            additional_data=int(delta),
+            position=(0, 0),
         )
         return self.hook._handle_mouse_event(event, self._state())
 
