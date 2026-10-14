@@ -71,7 +71,7 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         callback: Callback,
         *,
         config: Optional[MouseBindConfig] = None,
-        hwnd: Optional[int] = None,
+        hwnd: Optional[Union[int, str]] = None,
         dispatch: Optional[Callable[..., None]] = None,
         diagnostics: Optional[_DiagnosticsManager] = None,
     ) -> None:
@@ -152,6 +152,14 @@ class MouseBind(BaseBind[winput.MouseEvent]):
         self._hold_token += 1
         self._armed = False
         self._wheel_acc = 0
+
+    def _restore_held_state(self, state: InputState) -> None:
+        held = self._get_held_for_policy(state)
+        if self.button not in held:
+            return
+        down_act, _ = self._actions_for_button()
+        event = winput.MouseEvent(position=(0, 0), action=down_act, time=int(time.monotonic() * 1000), additional_data=2 if self.button == MouseButton.X2 else 1 if self.button == MouseButton.X1 else None)
+        self.handle(event, state)
 
     def _handle_wheel(self, event: winput.MouseEvent, now_ms: int, trace: _EventTrace) -> int:
         contrib = self._wheel_contribution(event)
@@ -392,7 +400,8 @@ class MouseBind(BaseBind[winput.MouseEvent]):
                 threading.Thread(target=_hold, daemon=True).start()
 
             elif trig == Trigger.ON_REPEAT and is_down:
-                delay_s = max(self.config.timing.hold_ms, self.config.timing.repeat_delay_ms) / 1000.0
+                repeat_delay_ms = self.config.timing.repeat_delay_ms
+                delay_s = max(0, self.config.timing.hold_ms if repeat_delay_ms is None else repeat_delay_ms) / 1000.0
                 interval_s = max(1, self.config.timing.repeat_interval_ms) / 1000.0
 
                 self._hold_token += 1
@@ -414,7 +423,7 @@ class MouseBind(BaseBind[winput.MouseEvent]):
                             if not self._armed:
                                 trace.skip("repeat_cancelled", reason_detail="button_released")
                                 break
-                            if not self._window_ok(force=True, trace=trace):
+                            if not self._window_ok(trace=trace):
                                 trace.skip("repeat_cancelled", reason_detail="window_mismatch")
                                 break
 

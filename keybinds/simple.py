@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, Union
 
 from keybinds import get_default_hook as get_hook, join
 from keybinds.bind import Hook
@@ -171,7 +171,7 @@ def hotkey(
     timeout: Optional[int] = None,
     double_tap_window: Optional[int] = None,
     triple_tap_window: Optional[int] = None,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     hook: Optional[Hook] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
@@ -218,7 +218,7 @@ def mouse(
     delay: Optional[int] = None,
     double_tap_window: Optional[int] = None,
     triple_tap_window: Optional[int] = None,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     hook: Optional[Hook] = None,
 ):
     """

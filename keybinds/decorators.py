@@ -22,7 +22,7 @@ def _add_binds_to_func(binds: List[Union[Bind, LogicalBind, TextAbbreviationBind
 def bind_key(
     keys: Union[str, List[str]],
     *,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     trigger_on_release: bool = False,
     suppress: bool = False,
     config: Optional[BindConfig] = None,
@@ -54,7 +54,7 @@ def bind_key(
 def bind_logical(
     exprs: Union[str, List[str]],
     *,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     config: Optional[BindConfig] = None,
     logical_config: Optional[LogicalConfig] = None,
     hook: Optional[Hook] = None,
@@ -86,7 +86,7 @@ def bind_logical(
 def bind_text(
     texts: Union[str, List[str]],
     *,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     config: Optional[BindConfig] = None,
     logical_config: Optional[LogicalConfig] = None,
     hook: Optional[Hook] = None,
@@ -120,7 +120,7 @@ def add_abbreviation(
     replacement: str,
     callback: Optional[Callback] = None,
     *,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     config: Optional[BindConfig] = None,
     logical_config: Optional[LogicalConfig] = None,
     hook: Optional[Hook] = None,
@@ -142,7 +142,7 @@ def bind_abbreviation(
     typed: Union[str, List[str]],
     replacement: str,
     *,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     config: Optional[BindConfig] = None,
     logical_config: Optional[LogicalConfig] = None,
     hook: Optional[Hook] = None,
@@ -175,7 +175,7 @@ def bind_abbreviation(
 def bind_mouse(
     buttons: Union[str, MouseButton, List[Union[str, MouseButton]]] = MouseButton.LEFT,
     *,
-    hwnd: Optional[int] = None,
+    hwnd: Optional[Union[int, str]] = None,
     config: Optional[MouseBindConfig] = None,
     hook: Optional[Hook] = None,
 ) -> Callable[[Callback], Callback]:

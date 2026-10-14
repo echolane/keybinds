@@ -98,7 +98,9 @@ class Timing:
     chord_timeout_ms: int = 350
     debounce_ms: int = 0
     hold_ms: int = 350
-    repeat_delay_ms: int = 350
+    # None keeps the legacy behavior: ON_REPEAT uses hold_ms as its initial delay.
+    # An explicit value (including 0) overrides hold_ms for ON_REPEAT.
+    repeat_delay_ms: Optional[int] = None
     repeat_interval_ms: int = 60
     double_tap_window_ms: int = 300
     triple_tap_window_ms: int = 300
@@ -166,6 +168,9 @@ class BindConfig:
     timing: Timing = field(default_factory=Timing)
     constraints: Constraints = field(default_factory=Constraints)
     checks: Checks = field(default_factory=Checks)
+    # Reconcile ON_HOLD/ON_REPEAT with input already held when the bind is
+    # added or its config changes. Kept opt-in to avoid surprising callbacks.
+    restore_state_on_bind: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "checks", Checks.coerce(self.checks))
@@ -234,6 +239,7 @@ class MouseBindConfig:
     checks: Checks = field(default_factory=Checks)
     # Units accumulated before one wheel callback. Win32 notch is 120.
     wheel_delta: int = 120
+    restore_state_on_bind: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "checks", Checks.coerce(self.checks))

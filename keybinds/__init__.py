@@ -38,7 +38,7 @@ from ._backend import reinstall_hooks, rehook
 
 from ._constants import register_key_token
 
-__version__ = "1.3.5"
+__version__ = "1.3.6"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy","TextBoundaryPolicy","TextBackspacePolicy","OsKeyRepeatPolicy","ReplacementPolicy",

@@ -235,13 +235,21 @@ class _FakeBackendSingleton:
     def __init__(self) -> None:
         self.registered = []
         self.reinstall_count = 0
+        self.keyboard_hook_needed = False
+        self.mouse_hook_needed = False
 
     def register(self, hook_obj) -> None:
         if hook_obj not in self.registered:
             self.registered.append(hook_obj)
+        self.update_hooks()
 
     def unregister(self, hook_obj) -> None:
         self.registered = [item for item in self.registered if item is not hook_obj]
+        self.update_hooks()
+
+    def update_hooks(self) -> None:
+        self.keyboard_hook_needed = any(h.started and bool(h._keyboard_snapshot) for h in self.registered)
+        self.mouse_hook_needed = any(h.started and bool(h._mouse_snapshot) for h in self.registered)
 
     def reinstall_hooks(self) -> None:
         self.reinstall_count += 1

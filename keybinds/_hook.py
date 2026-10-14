@@ -180,7 +180,7 @@ class Hook:
     def started(self) -> bool:
         return self._started
 
-    def bind(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, hwnd=None) -> Bind:
+    def bind(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, hwnd: Optional[Union[int, str]] = None) -> Bind:
         cfg = config or self.default_config or BindConfig()
         b = Bind(
             expr,
@@ -194,9 +194,13 @@ class Hook:
         with self._lock:
             self._keyboard_binds.append(b)
             self._keyboard_snapshot = tuple(self._keyboard_binds)
+        if self.started:
+            _GlobalBackend.instance().update_hooks()
+        if b.config.restore_state_on_bind:
+            b.restore_state()
         return b
 
-    def bind_logical(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd=None) -> LogicalBind:
+    def bind_logical(self, expr: str, callback: Callback, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd: Optional[Union[int, str]] = None) -> LogicalBind:
         cfg = config or self.default_config or BindConfig()
         lcfg = logical_config or self.default_logical_config or LogicalConfig()
         b = LogicalBind(
@@ -212,9 +216,13 @@ class Hook:
         with self._lock:
             self._keyboard_binds.append(b)
             self._keyboard_snapshot = tuple(self._keyboard_binds)
+        if self.started:
+            _GlobalBackend.instance().update_hooks()
+        if b.config.restore_state_on_bind:
+            b.restore_state()
         return b
 
-    def bind_text(self, text: str, callback: Callback, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd=None) -> TextAbbreviationBind:
+    def bind_text(self, text: str, callback: Callback, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd: Optional[Union[int, str]] = None) -> TextAbbreviationBind:
         cfg = config or self.default_config or BindConfig()
         lcfg = logical_config or self.default_logical_config or LogicalConfig()
         b = TextAbbreviationBind(
@@ -230,9 +238,13 @@ class Hook:
         with self._lock:
             self._keyboard_binds.append(b)
             self._keyboard_snapshot = tuple(self._keyboard_binds)
+        if self.started:
+            _GlobalBackend.instance().update_hooks()
+        if b.config.restore_state_on_bind:
+            b.restore_state()
         return b
 
-    def add_abbreviation(self, typed: str, replacement: str, callback: Optional[Callback] = None, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd=None) -> TextAbbreviationBind:
+    def add_abbreviation(self, typed: str, replacement: str, callback: Optional[Callback] = None, *, config: Optional[BindConfig] = None, logical_config: Optional[LogicalConfig] = None, hwnd: Optional[Union[int, str]] = None) -> TextAbbreviationBind:
         from .logical.translate import send_backspaces, send_unicode_text
         base_cfg = (self.default_config or BindConfig()).soft_merge(BindConfig(injected=InjectedPolicy.IGNORE))
         cfg = base_cfg.hard_merge(config) if config is not None else base_cfg
@@ -276,9 +288,13 @@ class Hook:
         with self._lock:
             self._keyboard_binds.append(b)
             self._keyboard_snapshot = tuple(self._keyboard_binds)
+        if self.started:
+            _GlobalBackend.instance().update_hooks()
+        if b.config.restore_state_on_bind:
+            b.restore_state()
         return b
 
-    def bind_mouse(self, button: Union[MouseButton, str], callback: Callback, *, config: Optional[MouseBindConfig] = None, hwnd=None) -> MouseBind:
+    def bind_mouse(self, button: Union[MouseButton, str], callback: Callback, *, config: Optional[MouseBindConfig] = None, hwnd: Optional[Union[int, str]] = None) -> MouseBind:
         cfg = config or self.default_mouse_config or MouseBindConfig()
         b = MouseBind(
             button,
@@ -292,6 +308,10 @@ class Hook:
         with self._lock:
             self._mouse_binds.append(b)
             self._mouse_snapshot = tuple(self._mouse_binds)
+        if self.started:
+            _GlobalBackend.instance().update_hooks()
+        if b.config.restore_state_on_bind:
+            b.restore_state()
         return b
 
     def _unbind_single(self, bind: Any) -> bool:
@@ -318,9 +338,17 @@ class Hook:
             return False
 
         if removed:
+            # Invalidate pending hold/repeat workers and discard any in-progress
+            # input state before this bind stops receiving backend events.
+            try:
+                bind.reset()
+            except Exception:
+                pass
             if owner_func is not None:
                 remove_binds_from_func(owner_func, [bind])
             unregister_bind(bind)
+            if self.started:
+                _GlobalBackend.instance().update_hooks()
         return removed
 
     def unbind(self, target: Any) -> None:
@@ -463,6 +491,7 @@ class Hook:
             self._started = False
             _GlobalBackend.instance().unregister(self)
             self._dispatcher.stop()
+        self._reset_runtime_states()
 
     def get_recent_diagnostics(self, limit: Optional[int] = None) -> List[DiagnosticRecord]:
         return self._diagnostics.get_recent(limit=limit)

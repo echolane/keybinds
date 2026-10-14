@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import weakref
 
 
 def _wait_until(predicate, *, timeout: float = 0.4, interval: float = 0.005) -> bool:
@@ -341,6 +342,9 @@ def test_hook_window_scoped_bind_respects_focus_and_blur_resets_state(runtime_en
         def is_focused(self):
             return self.focused
 
+        def focus_status(self):
+            return True, self.focused
+
     hook = runtime_env.make_hook()
     driver = runtime_env.HookDriver(runtime_env, hook)
     hits = []
@@ -588,3 +592,208 @@ def test_hook_bind_mouse_repeat_stops_after_pause_runtime(runtime_env):
     frozen = len(hits)
     time.sleep(0.05)
     assert len(hits) == frozen
+
+
+def test_unbind_stops_mouse_repeat_runtime(runtime_env):
+    MouseBindConfig = runtime_env.types.MouseBindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+    bind = hook.bind_mouse(
+        'x2',
+        lambda: hits.append(time.monotonic()),
+        config=MouseBindConfig(
+            trigger=Trigger.ON_REPEAT,
+            timing=Timing(hold_ms=0, repeat_delay_ms=5, repeat_interval_ms=10),
+        ),
+    )
+
+    driver.mouse('x2', 'down')
+    assert _wait_until(lambda: len(hits) >= 1)
+    hook.unbind(bind)
+    frozen = len(hits)
+    time.sleep(0.05)
+
+    assert len(hits) == frozen
+    assert not bind._armed
+
+
+def test_hook_close_stops_mouse_repeat_runtime(runtime_env):
+    MouseBindConfig = runtime_env.types.MouseBindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+    bind = hook.bind_mouse(
+        'x2',
+        lambda: hits.append(time.monotonic()),
+        config=MouseBindConfig(
+            trigger=Trigger.ON_REPEAT,
+            timing=Timing(hold_ms=0, repeat_delay_ms=5, repeat_interval_ms=10),
+        ),
+    )
+
+    driver.mouse('x2', 'down')
+    assert _wait_until(lambda: len(hits) >= 1)
+    hook.close()
+    frozen = len(hits)
+    time.sleep(0.05)
+
+    assert len(hits) == frozen
+    assert not bind._armed
+
+
+def test_bind_set_config_replaces_trigger_and_resets_state(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+    bind = hook.bind('r', lambda: hits.append('repeat'))
+
+    bind.set_config(BindConfig(trigger=Trigger.ON_REPEAT, timing=Timing(hold_ms=0, repeat_delay_ms=5, repeat_interval_ms=10)))
+    driver.key(ord('R'), 'down')
+    assert _wait_until(lambda: len(hits) >= 1)
+    driver.key(ord('R'), 'up')
+    frozen = len(hits)
+    time.sleep(0.04)
+
+    assert len(hits) == frozen
+    assert not bind._armed
+
+
+def test_repeat_delay_can_be_configured_with_either_timing_field(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+
+    for timing in (
+        Timing(hold_ms=0, repeat_interval_ms=30),
+        Timing(repeat_delay_ms=0, repeat_interval_ms=30),
+    ):
+        hook = runtime_env.make_hook()
+        driver = runtime_env.HookDriver(runtime_env, hook)
+        hits = []
+        hook.bind('r', lambda: hits.append(1), config=BindConfig(trigger=Trigger.ON_REPEAT, timing=timing))
+        driver.key(ord('R'), 'down')
+        assert _wait_until(lambda: bool(hits), timeout=0.15)
+        hook.close()
+
+
+def test_restore_state_starts_hold_for_already_pressed_key(runtime_env):
+    BindConfig = runtime_env.types.BindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+    InputState = runtime_env.loader.load('keybinds._state', 'keybinds/_state.py').InputState
+    hook = runtime_env.make_hook()
+    hits = []
+    bind = hook.bind('h', lambda: hits.append('held'), config=BindConfig(
+        trigger=Trigger.ON_HOLD,
+        timing=Timing(hold_ms=20),
+    ))
+
+    bind._restore_held_state(InputState({ord('H')}, set(), {ord('H')}, set(), set(), set()))
+
+    assert _wait_until(lambda: hits == ['held'])
+
+
+def test_invalid_hwnd_cancels_repeat_state(runtime_env):
+    MouseBindConfig = runtime_env.types.MouseBindConfig
+    Timing = runtime_env.types.Timing
+    Trigger = runtime_env.types.Trigger
+    hook = runtime_env.make_hook()
+    driver = runtime_env.HookDriver(runtime_env, hook)
+    hits = []
+    bind = hook.bind_mouse('x2', lambda: hits.append(1), config=MouseBindConfig(
+        trigger=Trigger.ON_REPEAT,
+        timing=Timing(hold_ms=0, repeat_delay_ms=5, repeat_interval_ms=10),
+    ))
+
+    class InvalidWindow:
+        def focus_status(self):
+            return False, False
+
+    bind.window = InvalidWindow()
+    driver.mouse('x2', 'down')
+    time.sleep(0.04)
+
+    assert hits == []
+    assert not bind._armed
+
+
+def test_backend_tracks_keyboard_and_mouse_bind_demand(runtime_env):
+    hook = runtime_env.make_hook()
+    hook.start()
+    backend = runtime_env.backend_singleton
+
+    assert not backend.keyboard_hook_needed
+    assert not backend.mouse_hook_needed
+
+    keyboard_bind = hook.bind('a', lambda: None)
+    assert backend.keyboard_hook_needed
+    assert not backend.mouse_hook_needed
+
+    mouse_bind = hook.bind_mouse('left', lambda: None)
+    assert backend.keyboard_hook_needed
+    assert backend.mouse_hook_needed
+
+    hook.unbind(keyboard_bind)
+    assert not backend.keyboard_hook_needed
+    assert backend.mouse_hook_needed
+
+    hook.unbind(mouse_bind)
+    assert not backend.keyboard_hook_needed
+    assert not backend.mouse_hook_needed
+    hook.close()
+
+
+def test_native_backend_installs_only_required_winput_hooks(runtime_env):
+    winput = runtime_env.winput
+    winput.WM_APP = 0x8000
+    winput.user32 = type('User32', (), {
+        'GetAsyncKeyState': staticmethod(lambda vk: 0x8000 if vk in (0x41, 0x01) else 0),
+    })()
+    backend_module = runtime_env.loader.load('keybinds._backend_native_probe', 'keybinds/_backend.py')
+
+    calls = []
+    winput.hook_keyboard = lambda callback: calls.append('hook_keyboard')
+    winput.unhook_keyboard = lambda: calls.append('unhook_keyboard')
+    winput.hook_mouse = lambda callback: calls.append('hook_mouse')
+    winput.unhook_mouse = lambda: calls.append('unhook_mouse')
+
+    backend = backend_module._GlobalBackend()
+    hook = type('HookState', (), {
+        'started': True,
+        '_keyboard_snapshot': (),
+        '_mouse_snapshot': (),
+    })()
+    backend._hooks.append(weakref.ref(hook))
+    backend._sync_input_hooks()
+    assert calls == []
+
+    hook._keyboard_snapshot = (object(),)
+    backend._sync_input_hooks()
+    assert calls == ['hook_keyboard']
+    assert 0x41 in backend.current_state_snapshot().pressed_keys
+
+    hook._mouse_snapshot = (object(),)
+    backend._sync_input_hooks()
+    assert calls == ['hook_keyboard', 'hook_mouse']
+    assert runtime_env.types.MouseButton.LEFT in backend.current_state_snapshot().pressed_mouse
+
+    hook._keyboard_snapshot = ()
+    backend._sync_input_hooks()
+    assert calls[-1] == 'unhook_keyboard'
+    assert backend._mouse_hook_installed
+
+    hook._mouse_snapshot = ()
+    backend._sync_input_hooks()
+    assert calls[-1] == 'unhook_mouse'
+    assert not backend._keyboard_hook_installed
+    assert not backend._mouse_hook_installed

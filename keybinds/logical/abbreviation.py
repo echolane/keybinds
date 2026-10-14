@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Optional, Deque, Set, Tuple
+from typing import Callable, Optional, Deque, Set, Tuple, Union
 
 from .. import winput
 from .._base_bind import BaseBind
@@ -47,7 +47,7 @@ class TextAbbreviationBind(BaseBind[winput.KeyboardEvent]):
         callback: Callback,
         *,
         config: Optional[BindConfig] = None,
-        hwnd: Optional[int] = None,
+        hwnd: Optional[Union[int, str]] = None,
         dispatch: Optional[Callable[..., None]] = None,
         diagnostics: Optional[_DiagnosticsManager] = None,
         logical_config: Optional[LogicalConfig] = None,

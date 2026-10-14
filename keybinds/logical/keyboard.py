@@ -42,7 +42,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Callable, Optional, Set, Dict, List, Tuple
+from typing import Callable, Optional, Set, Dict, List, Tuple, Union
 
 from .. import winput
 from ..types import (
@@ -236,7 +236,7 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
         callback: Callback,
         *,
         config: Optional[BindConfig] = None,
-        hwnd: Optional[int] = None,
+        hwnd: Optional[Union[int, str]] = None,
         dispatch: Optional[Callable[..., None]] = None,
         diagnostics: Optional[_DiagnosticsManager] = None,
         logical_config: Optional[LogicalConfig] = None,
@@ -441,6 +441,18 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
         self._reset_text_sequence_buffer()
         if not keep_press_suppress_vk:
             self._press_suppress_vk = None
+
+    def _restore_held_state(self, state: InputState) -> None:
+        if self.is_sequence or not self.steps:
+            return
+        chord = self.steps[self._seq_index]
+        held = self._get_held_for_policy(state)
+        candidates = sorted(held & set(chord.allowed_union))
+        if not candidates:
+            return
+        event = winput.KeyboardEvent(vkCode=candidates[-1], action=WM_KEYDOWN, time=int(time.monotonic() * 1000))
+        event._sb_is_repeat = False
+        self.handle(event, state)
 
     def _debounce_ok(self, now_ms: int) -> bool:
         db = self.config.timing.debounce_ms
@@ -1086,7 +1098,8 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
 
             elif trig == Trigger.ON_REPEAT:
                 if full and fresh_down and not is_repeat:
-                    delay_s = max(self.config.timing.hold_ms, self.config.timing.repeat_delay_ms) / 1000.0
+                    repeat_delay_ms = self.config.timing.repeat_delay_ms
+                    delay_s = max(0, self.config.timing.hold_ms if repeat_delay_ms is None else repeat_delay_ms) / 1000.0
                     interval_s = max(1, self.config.timing.repeat_interval_ms) / 1000.0
                     self._hold_token += 1
                     token = self._hold_token
@@ -1099,7 +1112,7 @@ class LogicalBind(BaseBind[winput.KeyboardEvent]):
                                 if token != self._hold_token:
                                     trace.skip("repeat_cancelled", reason_detail="token_changed")
                                     break
-                                if not self._window_ok(force=True, trace=trace):
+                                if not self._window_ok(trace=trace):
                                     trace.skip("repeat_cancelled", reason_detail="window_mismatch")
                                     break
                                 if not self._armed:

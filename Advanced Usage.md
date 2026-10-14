@@ -135,6 +135,19 @@ hook.stop()   # signal wait()/join() to exit
 hook.close()  # detach this frontend + stop callback workers
 ```
 
+Bind configuration can be replaced at runtime. State restoration is opt-in;
+set `restore_state_on_bind=True` in `BindConfig` or `MouseBindConfig`, or call
+`restore_state()` manually:
+
+```python
+bind.set_config(BindConfig(trigger=Trigger.ON_REPEAT, restore_state_on_bind=True))
+bind.restore_state()  # explicitly resync after a manual bind.reset()
+```
+
+`hwnd` can be an integer handle or an exact, case-insensitive window title.
+Titles are resolved again during focus checks. If the target window disappears,
+the bind cancels pending timers and clears its runtime state.
+
 ### `wait(timeout)` for polling
 
 ```python
@@ -437,7 +450,7 @@ from keybinds import Timing
 
 Timing(
     hold_ms=400,
-    repeat_delay_ms=200,
+    repeat_delay_ms=200,  # overrides hold_ms for ON_REPEAT
     repeat_interval_ms=80,
     double_tap_window_ms=300,
     window_focus_cache_ms=50,
@@ -446,6 +459,10 @@ Timing(
     debounce_ms=0,
 )
 ```
+
+For `ON_REPEAT`, `repeat_delay_ms=None` uses `hold_ms` as the initial wait.
+Set `repeat_delay_ms` explicitly to override it, including `0` for immediate
+repeats. The repeat interval is independent.
 
 ### Practical usage tips
 
@@ -553,7 +570,9 @@ When provided, the bind only evaluates while that window is focused.
 hook.bind("ctrl+e", callback, hwnd=target_hwnd)
 ```
 
-`Timing.window_focus_cache_ms` controls how often the active-window check is refreshed.
+`Timing.window_focus_cache_ms` controls how often validity and foreground focus
+are refreshed. Cached HWNDs avoid repeated enumeration for title targets, and
+repeat workers use the same cache interval.
 
 ```python
 from keybinds import BindConfig, Timing

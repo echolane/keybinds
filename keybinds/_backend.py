@@ -1,11 +1,11 @@
-# keybinds/_backend.py
 from __future__ import annotations
 
 import atexit
 import threading
+import time
 import weakref
 from traceback import print_exc
-from typing import Optional, List, Set
+from typing import Optional, List, Set, TYPE_CHECKING
 
 from . import winput
 
@@ -21,7 +21,11 @@ from ._constants import (
 from .types import MouseButton
 from ._state import InputState
 
+if TYPE_CHECKING:
+    from ._hook import Hook
+
 WM_KEYBINDS_REINSTALL = winput.WM_APP + 1
+WM_KEYBINDS_UPDATE_HOOKS = winput.WM_APP + 2
 
 
 class _GlobalBackend:
@@ -41,6 +45,7 @@ class _GlobalBackend:
 
         self._thread: Optional[threading.Thread] = None
         self._thread_started = False
+        self._shutdown_requested = False
 
         # physical only
         self._pressed_keys: Set[int] = set()
@@ -56,9 +61,12 @@ class _GlobalBackend:
 
         self._thread_id: Optional[int] = None
         self._thread_ready = threading.Event()
+        self._hook_sync_event = threading.Event()
         self._state_lock = threading.RLock()
         self._atexit_registered = False
         self._shutdown_lock = threading.Lock()
+        self._keyboard_hook_installed = False
+        self._mouse_hook_installed = False
 
     @classmethod
     def instance(cls) -> _GlobalBackend:
@@ -83,6 +91,8 @@ class _GlobalBackend:
             try:
                 if not self._alive_hooks():
                     self.shutdown()
+                else:
+                    self.update_hooks()
             except Exception:
                 pass
 
@@ -90,7 +100,8 @@ class _GlobalBackend:
             self._hooks.append(weakref.ref(hook_obj, _on_hook_gc))
 
         self._ensure_atexit()
-        self._ensure_thread()
+        if any(self._desired_input_hooks()):
+            self._ensure_thread()
 
     def unregister(self, hook_obj) -> None:
         """Unregister a Hook frontend. Last hook tears down the backend."""
@@ -107,6 +118,43 @@ class _GlobalBackend:
             remaining = bool(new_list)
         if not remaining:
             self.shutdown()
+        else:
+            self.update_hooks()
+
+    def update_hooks(self) -> None:
+        """Reconcile native hooks with the device types used by active binds."""
+        needs_hooks = any(self._desired_input_hooks())
+        with self._hooks_lock:
+            thread = self._thread
+            running = self._thread_started and thread is not None and thread.is_alive()
+            stopping = self._shutdown_requested
+        if not running or stopping:
+            if not needs_hooks:
+                return
+            self._ensure_thread()
+        if not self._thread_ready.wait(timeout=1.0):
+            return
+        if self._thread_id == threading.get_ident():
+            self._sync_input_hooks()
+            return
+        stop_at = time.monotonic() + 1.0
+        while True:
+            desired = self._desired_input_hooks()
+            installed = (self._keyboard_hook_installed, self._mouse_hook_installed)
+            if desired == installed:
+                return
+            thread_id = self._thread_id
+            if thread_id is None:
+                return
+            self._hook_sync_event.clear()
+            try:
+                winput.post_thread_message(thread_id, WM_KEYBINDS_UPDATE_HOOKS, 0, 0)
+            except Exception:
+                return
+            remaining = stop_at - time.monotonic()
+            if remaining <= 0 or not self._hook_sync_event.wait(min(remaining, 0.1)):
+                if time.monotonic() >= stop_at:
+                    return
 
     def _ensure_atexit(self) -> None:
         if self._atexit_registered:
@@ -122,27 +170,36 @@ class _GlobalBackend:
         with self._shutdown_lock:
             with self._hooks_lock:
                 thread_id = self._thread_id
-
-            self._unhook_now()
-
+                self._shutdown_requested = thread_id is not None
             if thread_id is not None:
                 try:
-                    winput.post_thread_message(thread_id, winput.WM_QUIT, 0, 0)
+                    if self._thread_ready.wait(timeout=1.0):
+                        winput.post_thread_message(thread_id, winput.WM_QUIT, 0, 0)
+                        return
                 except Exception:
                     pass
+            self._unhook_now()
+            with self._hooks_lock:
+                self._shutdown_requested = False
 
     def _unhook_now(self) -> None:
-        try:
-            winput.unhook_keyboard()
-        except Exception:
-            pass
-        try:
-            winput.unhook_mouse()
-        except Exception:
-            pass
+        if self._keyboard_hook_installed:
+            try:
+                winput.unhook_keyboard()
+            except Exception:
+                pass
+            self._keyboard_hook_installed = False
+        if self._mouse_hook_installed:
+            try:
+                winput.unhook_mouse()
+            except Exception:
+                pass
+            self._mouse_hook_installed = False
 
     def reinstall_hooks(self) -> None:
-        if not self._thread_started:
+        with self._hooks_lock:
+            needs_thread = not self._thread_started or self._shutdown_requested
+        if needs_thread:
             self._ensure_thread()
 
         if not self._thread_ready.wait(timeout=1.0):
@@ -182,25 +239,36 @@ class _GlobalBackend:
             )
 
     def _ensure_thread(self) -> None:
-        with self._hooks_lock:
-            t = self._thread
-            if t is not None and t.is_alive():
+        while True:
+            with self._hooks_lock:
+                t = self._thread
+                if t is not None and t.is_alive():
+                    if not self._shutdown_requested:
+                        return
+                else:
+                    self._shutdown_requested = False
+                    self._thread_started = True
+                    self._thread_ready.clear()
+                    t = threading.Thread(target=self._thread_main, name="keybinds-backend", daemon=True)
+                    self._thread = t
+                    t.start()
+                    return
+            # A WM_QUIT is already queued for this thread; wait for its cleanup
+            # before creating a replacement so new hooks cannot be stranded.
+            t.join(timeout=1.0)
+            if t.is_alive():
                 return
-            self._thread_started = True
-
-        self._thread_ready.clear()
-        t = threading.Thread(target=self._thread_main, name="keybinds-backend", daemon=True)
-        self._thread = t
-        t.start()
 
     def _on_backend_message(self, msg) -> bool:
-        if int(msg.message) == WM_KEYBINDS_REINSTALL:
+        message = int(msg.message)
+        if message == WM_KEYBINDS_REINSTALL:
             self._unhook_now()
             self._clear_pressed_state()
             self._reset_all_hook_runtime_states()
-
-            winput.hook_keyboard(self._on_keyboard)
-            winput.hook_mouse(self._on_mouse)
+            self._sync_input_hooks()
+            return True
+        if message == WM_KEYBINDS_UPDATE_HOOKS:
+            self._sync_input_hooks()
             return True
 
         return False
@@ -213,8 +281,7 @@ class _GlobalBackend:
         self._thread_ready.set()
 
         try:
-            winput.hook_keyboard(self._on_keyboard)
-            winput.hook_mouse(self._on_mouse)
+            self._sync_input_hooks()
             winput.wait_messages(self._on_backend_message)
         except Exception:
             print_exc()
@@ -226,12 +293,95 @@ class _GlobalBackend:
                 self._thread = None
                 self._thread_id = None
                 self._thread_ready.clear()
+                self._shutdown_requested = False
+                self._hook_sync_event.set()
+
+    def _sync_input_hooks(self) -> None:
+        """Install each low-level hook only while an active bind needs it."""
+        keyboard_needed, mouse_needed = self._desired_input_hooks()
+
+        if keyboard_needed and not self._keyboard_hook_installed:
+            self._seed_keyboard_state()
+            winput.hook_keyboard(self._on_keyboard)
+            self._keyboard_hook_installed = True
+        elif not keyboard_needed and self._keyboard_hook_installed:
+            winput.unhook_keyboard()
+            self._keyboard_hook_installed = False
+            self._clear_keyboard_state()
+
+        if mouse_needed and not self._mouse_hook_installed:
+            self._seed_mouse_state()
+            winput.hook_mouse(self._on_mouse)
+            self._mouse_hook_installed = True
+        elif not mouse_needed and self._mouse_hook_installed:
+            winput.unhook_mouse()
+            self._mouse_hook_installed = False
+            self._clear_mouse_state()
+        self._hook_sync_event.set()
+
+    def _seed_keyboard_state(self) -> None:
+        """Snapshot keys held before installing a previously inactive hook."""
+        user32 = winput.user32
+        mouse_vks = {0x01, 0x02, 0x04, 0x05, 0x06}
+        pressed = {
+            vk for vk in range(0x08, 0xFF)
+            if vk not in mouse_vks and (int(user32.GetAsyncKeyState(vk)) & 0x8000)
+        }
+        with self._state_lock:
+            self._pressed_keys.clear()
+            self._pressed_keys.update(pressed)
+            self._pressed_keys_all.clear()
+            self._pressed_keys_all.update(pressed)
+            self._pressed_keys_injected.clear()
+
+    def _seed_mouse_state(self) -> None:
+        """Snapshot mouse buttons held before installing a previously inactive hook."""
+        user32 = winput.user32
+        vk_for_button = {
+            MouseButton.LEFT: 0x01,
+            MouseButton.RIGHT: 0x02,
+            MouseButton.MIDDLE: 0x04,
+            MouseButton.X1: 0x05,
+            MouseButton.X2: 0x06,
+        }
+        pressed = {
+            button for button, vk in vk_for_button.items()
+            if int(user32.GetAsyncKeyState(vk)) & 0x8000
+        }
+        with self._state_lock:
+            self._pressed_mouse.clear()
+            self._pressed_mouse.update(pressed)
+            self._pressed_mouse_all.clear()
+            self._pressed_mouse_all.update(pressed)
+            self._pressed_mouse_injected.clear()
+
+    def _desired_input_hooks(self):
+        keyboard_needed = False
+        mouse_needed = False
+        for hook in self._alive_hooks():
+            if not hook.started:
+                continue
+            keyboard_needed = keyboard_needed or bool(hook._keyboard_snapshot)
+            mouse_needed = mouse_needed or bool(hook._mouse_snapshot)
+        return keyboard_needed, mouse_needed
+
+    def _clear_keyboard_state(self) -> None:
+        with self._state_lock:
+            self._pressed_keys.clear()
+            self._pressed_keys_all.clear()
+            self._pressed_keys_injected.clear()
+
+    def _clear_mouse_state(self) -> None:
+        with self._state_lock:
+            self._pressed_mouse.clear()
+            self._pressed_mouse_all.clear()
+            self._pressed_mouse_injected.clear()
 
     # -------------------------
     # dispatch
     # -------------------------
 
-    def _alive_hooks(self) -> list:
+    def _alive_hooks(self) -> List[Hook]:
         """Return strong refs to currently alive Hook objects."""
         out = []
         with self._hooks_lock:
@@ -307,7 +457,6 @@ class _GlobalBackend:
                     print_exc()
             return flags
 
-        # Hard filter: only handle button up/down (move is noise).
         if act not in MOUSE_BUTTON_ACTIONS:
             return winput.WP_CONTINUE
 

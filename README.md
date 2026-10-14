@@ -7,6 +7,7 @@ Flexible global keyboard & mouse hotkeys for Windows.
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-active-success)
 ![PyPI](https://img.shields.io/pypi/v/keybinds)
+![Vibe-coded](https://img.shields.io/badge/vibe--coded-project-8A2BE2)
 
 **keybinds** is a Python library for global keyboard and mouse binds on Windows, with support for hotkeys, logical key binds, text matching, and text abbreviations.
 
@@ -197,9 +198,13 @@ hook.bind(
     config=BindConfig(
         trigger=Trigger.ON_HOLD,
         timing=Timing(hold_ms=400),
+        restore_state_on_bind=True,
     ),
 )
 ```
+
+Already-held input is ignored by default; use `restore_state_on_bind=True` to
+include it, or call `bind.restore_state()` manually.
 
 ### Repeat (auto-fire while held)
 

@@ -7,7 +7,7 @@ from . import winput
 
 from ._state import InputState
 from ._window import get_window
-from .types import Callback, FocusPolicy, BindConfig, MouseBindConfig
+from .types import Callback, FocusPolicy, BindConfig, MouseBindConfig, LogicalConfig, Trigger
 from .diagnostics import _NULL_BOUND_DIAGNOSTICS, build_bind_metadata, _BoundDiagnostics, _DiagnosticsManager, _DispatchTrace, _EventTrace
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ class BaseBind(Generic[E]):
         callback: Callback,
         *,
         config: Optional[Union[BindConfig, MouseBindConfig]] = None,
-        hwnd: Optional[int] = None,
+        hwnd: Optional[Union[int, str]] = None,
         dispatch: Optional[Callable[..., None]] = None,
         diagnostics: Optional[_DiagnosticsManager] = None,
     ) -> None:
@@ -33,6 +33,7 @@ class BaseBind(Generic[E]):
         self._dispatch = dispatch or self._dispatch_inline
         self._diag_manager = diagnostics
         self._diag: _BoundDiagnostics = _NULL_BOUND_DIAGNOSTICS
+        self._diagnostics_identity = ("", "")
 
         self._hold_token: int = 0
 
@@ -54,6 +55,7 @@ class BaseBind(Generic[E]):
         fn()
 
     def _set_diagnostics_identity(self, bind_name: str, device: str) -> None:
+        self._diagnostics_identity = (bind_name, device)
         if self._diag_manager is None:
             self._diag = _NULL_BOUND_DIAGNOSTICS
             return
@@ -93,6 +95,47 @@ class BaseBind(Generic[E]):
     def reset(self) -> None:
         pass
 
+    def set_config(
+        self,
+        config: Union[BindConfig, MouseBindConfig],
+        *,
+        logical_config: Optional[LogicalConfig] = None,
+    ) -> None:
+        """Replace this bind's immutable config and reset its runtime state."""
+        expected = MouseBindConfig if isinstance(self.config, MouseBindConfig) else BindConfig
+        if not isinstance(config, expected):
+            raise TypeError(f"Expected {expected.__name__}, got {type(config).__name__}")
+        if logical_config is not None:
+            if not hasattr(self, "logical_config"):
+                raise TypeError("logical_config is only supported by logical keyboard binds")
+            if not isinstance(logical_config, LogicalConfig):
+                raise TypeError(f"Expected LogicalConfig, got {type(logical_config).__name__}")
+        with self._lock:
+            self.config = config
+            if logical_config is not None:
+                self.logical_config = logical_config
+            self.reset()
+            self._focus_cache = True
+            self._focus_last_check_ms = 0
+            self._focus_last_value = None
+            self._set_diagnostics_identity(*self._diagnostics_identity)
+        if self.config.restore_state_on_bind:
+            self.restore_state()
+
+    def restore_state(self) -> None:
+        """Reconcile hold/repeat triggers with input already held by the user."""
+        if self.config.trigger not in (Trigger.ON_HOLD, Trigger.ON_REPEAT):
+            return
+        try:
+            from ._backend import _GlobalBackend
+            self._restore_held_state(_GlobalBackend.instance().current_state_snapshot())
+        except (AttributeError, RuntimeError):
+            # A backend may not be available yet (for example, before start()).
+            return
+
+    def _restore_held_state(self, state: InputState) -> None:
+        del state
+
     def is_pressed(self) -> bool:
         """True if the bind is currently fully active (full chord / button held)."""
         return False
@@ -117,7 +160,6 @@ class BaseBind(Generic[E]):
     def _window_ok(self, *, force: bool = False, trace: Optional[_EventTrace] = None) -> bool:
         if self.window is None:
             return True
-
         now_ms = int(time.monotonic() * 1000)
         cache_ms = self.config.timing.window_focus_cache_ms
 
@@ -128,9 +170,19 @@ class BaseBind(Generic[E]):
 
         self._focus_last_check_ms = now_ms
         try:
-            focused = bool(self.window.is_focused())
+            valid, focused = self.window.focus_status()
         except Exception:
-            focused = False
+            valid, focused = False, False
+
+        if not valid:
+            # A destroyed HWND cannot regain focus; cancel pending timers and
+            # transient state. Native Window.focus_status checks it in one pass.
+            self.reset()
+            self._focus_cache = False
+            self._focus_last_value = False
+            if trace is not None:
+                trace.skip("window_invalid")
+            return False
 
         if self._focus_last_value is None:
             self._focus_last_value = focused

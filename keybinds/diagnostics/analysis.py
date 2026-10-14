@@ -298,7 +298,9 @@ def _primary_detail_lines(decision: BindDecision) -> List[str]:
         if actual is not None:
             out.append(f"Actual hold time: {actual} ms")
     elif reason in ('repeat_not_started', 'repeat_waiting_for_first_tick', 'repeat_active', 'repeat_cancelled'):
-        delay = details.get('repeat_delay_ms') or (decision.metadata.repeat_delay_ms if decision.metadata is not None else None)
+        delay = details.get('repeat_delay_ms')
+        if delay is None and decision.metadata is not None:
+            delay = decision.metadata.repeat_delay_ms
         if delay is not None:
             out.append(f"Repeat delay: {delay} ms")
         ticks = decision.trigger_details.get('repeat_ticks')
@@ -760,8 +762,12 @@ def _trigger_lines(decision: BindDecision) -> List[str]:
         if d.get('hold_cancel_reason'):
             out.append(f"hold cancel reason: {d['hold_cancel_reason']}")
     elif trigger == 'on_repeat':
-        delay = d.get('repeat_delay_ms') or (decision.metadata.repeat_delay_ms if decision.metadata is not None else None)
-        interval = d.get('repeat_interval_ms') or (decision.metadata.repeat_interval_ms if decision.metadata is not None else None)
+        delay = d.get('repeat_delay_ms')
+        if delay is None and decision.metadata is not None:
+            delay = decision.metadata.repeat_delay_ms
+        interval = d.get('repeat_interval_ms')
+        if interval is None and decision.metadata is not None:
+            interval = decision.metadata.repeat_interval_ms
         if delay is not None:
             out.append(f"repeat delay: {delay} ms")
         if interval is not None:
