@@ -6,6 +6,8 @@ For the experimental logical-input APIs, see **[Logical Binds and Abbreviations.
 
 For event-level debugging and tracing, see **[Diagnostics.md](./Diagnostics.md)**.
 
+For capturing input, consuming event streams, dynamic interception, and reading typed text, see **[Capture, streams and interception.md](./Capture,%20streams%20and%20interception.md)**.
+
 ## Contents
 
 - [1) When to use this document](#1-when-to-use-this-document)

@@ -361,8 +361,8 @@ class _GlobalBackend:
         for hook in self._alive_hooks():
             if not hook.started:
                 continue
-            keyboard_needed = keyboard_needed or bool(hook._keyboard_snapshot)
-            mouse_needed = mouse_needed or bool(hook._mouse_snapshot)
+            keyboard_needed = keyboard_needed or bool(hook._keyboard_snapshot) or any(getattr(s, "_device", "keyboard") == "keyboard" for s in hook._capture_sessions) or (hook._active_interceptor is not None and hook._active_interceptor.keyboard)
+            mouse_needed = mouse_needed or bool(hook._mouse_snapshot) or any(getattr(s, "_device", "keyboard") == "mouse" for s in hook._capture_sessions) or (hook._active_interceptor is not None and hook._active_interceptor.mouse)
         return keyboard_needed, mouse_needed
 
     def _clear_keyboard_state(self) -> None:

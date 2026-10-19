@@ -138,6 +138,8 @@ class Hook:
 
         self._pause_count = 0
         self._paused = False
+        self._capture_sessions = []
+        self._active_interceptor = None
 
         self.default_config = default_config
         self.default_mouse_config = default_mouse_config
@@ -314,6 +316,109 @@ class Hook:
             b.restore_state()
         return b
 
+    def _register_capture(self, session):
+        backend=_GlobalBackend.instance()
+        state=backend.current_state_snapshot()
+        if getattr(session, "_device", "keyboard") == "keyboard":
+            held=set(state.pressed_keys_all or ())
+            if session.config.ignore_already_pressed:
+                user32=__import__('keybinds.winput',fromlist=['user32']).user32
+                held.update(vk for vk in range(8,0xFF) if vk not in (1,2,4,5,6) and int(user32.GetAsyncKeyState(vk))&0x8000)
+            session._initial_pressed = held if session.config.ignore_already_pressed else set()
+        else:
+            held={b.name.lower() for b in (state.pressed_mouse_all or set())}
+            if session.config.ignore_already_pressed:
+                user32=__import__('keybinds.winput',fromlist=['user32']).user32
+                held.update(name for name,vk in {'left':1,'right':2,'middle':4,'x1':5,'x2':6}.items() if int(user32.GetAsyncKeyState(vk))&0x8000)
+            session._initial_mouse=held if session.config.ignore_already_pressed else set()
+        with self._lock: self._capture_sessions.append(session)
+        if self.started: backend.update_hooks()
+
+    def _unregister_capture(self, session):
+        with self._lock:
+            if session in self._capture_sessions: self._capture_sessions.remove(session)
+        if self.started: _GlobalBackend.instance().update_hooks()
+
+    def _register_interceptor(self, stream):
+        if self._active_interceptor is not None and self._active_interceptor is not stream:
+            raise RuntimeError("Only one interceptor can be active per Hook")
+        self._active_interceptor = stream
+        if self.started: _GlobalBackend.instance().update_hooks()
+
+    def _unregister_interceptor(self, stream):
+        if self._active_interceptor is stream: self._active_interceptor = None
+        if self.started: _GlobalBackend.instance().update_hooks()
+
+    @staticmethod
+    def _capture_target_matches(hwnd):
+        if hwnd is None:return True
+        try:
+            from ._window import get_window
+            return get_window(hwnd).is_focused()
+        except Exception:return False
+
+    @staticmethod
+    def _interceptor_injection_matches(stream, event):
+        from .types import InjectedPolicy
+        injected=bool(getattr(event,'injected',False))
+        return stream._config.injected==InjectedPolicy.ALLOW or (stream._config.injected==InjectedPolicy.IGNORE and not injected) or (stream._config.injected==InjectedPolicy.ONLY and injected)
+
+    @staticmethod
+    def _make_captured_key(event, state, config=None):
+        from .capture.convert import vk_to_token, vk_to_char
+        from .capture.models import CapturedKey
+        from ._constants import VK_SHIFT, VK_CONTROL, VK_MENU, VK_CAPITAL
+        import time
+        vk=int(event.vkCode); down=event.action in (0x0100,0x0104)
+        repeat=bool(getattr(event,"_sb_is_repeat",False))
+        token=vk_to_token(vk, bool(getattr(config,"side_specific_modifiers",False)))
+        action="repeat" if down and repeat else ("press" if down else "release")
+        keys=state.pressed_keys_all or set()
+        shift=any(x in keys for x in (VK_SHIFT,0xA0,0xA1))
+        ctrl=any(x in keys for x in (VK_CONTROL,0xA2,0xA3))
+        alt=any(x in keys for x in (VK_MENU,0xA4,0xA5))
+        caps=bool(__import__('keybinds.winput',fromlist=['user32']).user32.GetKeyState(VK_CAPITAL)&1)
+        if config is not None and not config.respect_caps_lock:caps=False
+        char=vk_to_char(vk,shift=shift,caps_lock=caps,alt_gr=bool(alt and ctrl),hwnd=getattr(config,"hwnd",None))
+        if ctrl and not alt:char=None
+        if char and any(ord(c)<32 or ord(c)==127 for c in char):char=None
+        mod=token in {'ctrl','shift','alt','win','lctrl','rctrl','lshift','rshift','lalt','ralt','lwin','rwin'}
+        return CapturedKey(vk,int(getattr(event,'scanCode',0)),token,char,action,mod,bool(getattr(event,'injected',False)),time.monotonic())
+
+    def capture_key(self, suppress=True, timeout=None, config=None):
+        from .capture.recorder import capture_key
+        return capture_key(self, suppress, timeout, config)
+    async def capture_key_async(self, suppress=True, timeout=None, config=None):
+        import asyncio
+        return await asyncio.get_running_loop().run_in_executor(None, self.capture_key, suppress, timeout, config)
+    def capture_chord(self, suppress=True, timeout=None, on_change=None, config=None):
+        from .capture.recorder import capture_chord
+        return capture_chord(self, suppress, timeout, on_change, config)
+    async def capture_chord_async(self, suppress=True, timeout=None, on_change=None, config=None):
+        import asyncio
+        return await asyncio.get_running_loop().run_in_executor(None, self.capture_chord, suppress, timeout, on_change, config)
+    def capture_mouse(self, suppress=True, timeout=None, config=None):
+        from .capture.recorder import capture_mouse
+        return capture_mouse(self, suppress, timeout, config)
+    async def capture_mouse_async(self, suppress=True, timeout=None, config=None):
+        import asyncio
+        return await asyncio.get_running_loop().run_in_executor(None, self.capture_mouse, suppress, timeout, config)
+    def stream_keys(self, suppress=False, config=None):
+        from .capture.stream import KeyStream
+        return KeyStream(self, suppress, config)
+    def stream_mouse(self, suppress=False, config=None):
+        from .capture.stream import MouseStream
+        return MouseStream(self, suppress, config)
+    def intercept(self, keyboard=True, mouse=False, config=None):
+        from .capture.intercept import InterceptStream
+        return InterceptStream(self, config, keyboard, mouse)
+    def read_text(self, **kwargs):
+        from .capture.text import read_text
+        return read_text(self, **kwargs)
+    def stream_text(self, **kwargs):
+        from .capture.text import TextStream
+        return TextStream(self, **kwargs)
+
     def _unbind_single(self, bind: Any) -> bool:
         removed = False
         owner_func = owner_func_for_bind(bind)
@@ -483,10 +588,23 @@ class Hook:
         if not self.started:
             self._started = True
             _GlobalBackend.instance().register(self)
+            _GlobalBackend.instance().update_hooks()
+            state = _GlobalBackend.instance().current_state_snapshot()
+            for session in tuple(self._capture_sessions):
+                if getattr(session,"_device","keyboard")=="keyboard":
+                    session._initial_pressed=set(state.pressed_keys_all or ()) if session.config.ignore_already_pressed else set()
+                else:
+                    session._initial_mouse={b.name.lower() for b in (state.pressed_mouse_all or set())} if session.config.ignore_already_pressed else set()
             if self._dispatcher.stopped:
                 self._dispatcher.start()
 
     def close(self) -> None:
+        for session in tuple(self._capture_sessions):
+            try: session.stop()
+            except Exception: pass
+        if self._active_interceptor is not None:
+            try: self._active_interceptor.close()
+            except Exception: pass
         if self.started:
             self._started = False
             _GlobalBackend.instance().unregister(self)
@@ -525,6 +643,17 @@ class Hook:
     # -------------------------
 
     def _handle_keyboard_event(self, event, state) -> int:
+        if (self._active_interceptor and self._active_interceptor.keyboard and
+                self._capture_target_matches(self._active_interceptor._config.hwnd) and
+                self._interceptor_injection_matches(self._active_interceptor, event)):
+            key=self._make_captured_key(event,state,self._active_interceptor._config)
+            return self._active_interceptor.handle_event(key)
+        capture_flags = 0
+        for session in tuple(self._capture_sessions):
+            if getattr(session, '_device', None) == 'keyboard':
+                key=self._make_captured_key(event,state,session.config)
+                capture_flags |= session.handle_event(key)
+        if capture_flags: return capture_flags
         event_id = self._diagnostics.prepare_event(event, "keyboard")
         with self._lock:
             if self._paused:
@@ -540,6 +669,47 @@ class Hook:
         return flags
 
     def _handle_mouse_event(self, event, state) -> int:
+        if (self._active_interceptor and self._active_interceptor.mouse and
+                self._capture_target_matches(self._active_interceptor._config.hwnd) and
+                self._interceptor_injection_matches(self._active_interceptor, event)):
+            from .capture.models import CapturedMouse
+            from ._constants import MOUSE_WHEEL_ACTIONS
+            import time
+            delta=int(getattr(event,'additional_data',0) or 0)
+            if event.action in MOUSE_WHEEL_ACTIONS:
+                btn='wheel_up' if delta>0 else 'wheel_down'
+                action='scroll'
+            else:
+                btn={0x0201:'left',0x0202:'left',0x0204:'right',0x0205:'right',0x0207:'middle',0x0208:'middle',0x020B:'x1' if delta==1 else 'x2',0x020C:'x1' if delta==1 else 'x2'}.get(event.action)
+                if btn is None:return 0
+                action='press' if event.action in (0x0201,0x0204,0x0207,0x020B) else 'release'
+            mouse=CapturedMouse(btn,action,event.x,event.y,delta,bool(getattr(event,'injected',False)),time.monotonic())
+            return self._active_interceptor.handle_event(mouse)
+        from .capture.models import CapturedMouse
+        from ._constants import MOUSE_WHEEL_ACTIONS
+        import time
+        button_map={0x0201:'left',0x0202:'left',0x0204:'right',0x0205:'right',0x0207:'middle',0x0208:'middle',0x020B:'x1' if getattr(event,'additional_data',0)==1 else 'x2',0x020C:'x1' if getattr(event,'additional_data',0)==1 else 'x2'}
+        if event.action in MOUSE_WHEEL_ACTIONS:
+            delta=int(getattr(event,'additional_data',0) or 0); button='wheel_up' if delta>0 else 'wheel_down'; action='scroll'
+        else:
+            button=button_map.get(event.action); action='press' if event.action in (0x0201,0x0204,0x0207,0x020B) else 'release'
+        if button:
+            mouse=CapturedMouse(button,action,event.x,event.y,int(getattr(event,'additional_data',0) or 0),bool(getattr(event,'injected',False)),time.monotonic())
+            flags=0
+            for session in tuple(self._capture_sessions):
+                if getattr(session,'_device',None)=='mouse':
+                    from .types import InjectedPolicy
+                    from .capture.stream import _should_suppress
+                    policy=session.config.injected
+                    if policy == InjectedPolicy.IGNORE and mouse.injected: continue
+                    if policy == InjectedPolicy.ONLY and not mouse.injected: continue
+                    if not self._capture_target_matches(session.config.hwnd): continue
+                    if button in session._initial_mouse:
+                        if action=='release':session._initial_mouse.discard(button)
+                        continue
+                    session._queue.put(mouse)
+                    if _should_suppress(session.suppress,mouse): flags |= 4
+            if flags:return flags
         event_id = self._diagnostics.prepare_event(event, "mouse")
         with self._lock:
             if self._paused:

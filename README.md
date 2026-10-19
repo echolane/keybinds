@@ -20,6 +20,7 @@ It supports:
 - decorator helpers and a simple API
 - experimental logical binds, typed-text matching, and text abbreviations
 - unified unbind helpers for bind handles, decorated functions, and bind collections
+- keyboard/mouse capture, event streams, text input capture, and synchronous interception
 
 Powered by a bundled/modified **[winput](https://github.com/Zuzu-Typ/winput)** for reliable input suppression and precise control.
 
@@ -98,6 +99,8 @@ keybinds.join()
 ```
 
 For non-decorator usage, `keybinds.add_abbreviation(...)` is also available.
+
+For input capture and event handling, see the [capture guide](./Capture,%20streams%20and%20interception.md).
 
 ---
 

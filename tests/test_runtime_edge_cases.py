@@ -772,6 +772,8 @@ def test_native_backend_installs_only_required_winput_hooks(runtime_env):
         'started': True,
         '_keyboard_snapshot': (),
         '_mouse_snapshot': (),
+        '_capture_sessions': (),
+        '_active_interceptor': None,
     })()
     backend._hooks.append(weakref.ref(hook))
     backend._sync_input_hooks()

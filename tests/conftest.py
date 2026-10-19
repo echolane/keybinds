@@ -373,6 +373,8 @@ def runtime_env():
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
                 setattr(self, key, value)
+            self.x = getattr(self, 'x', 0)
+            self.y = getattr(self, 'y', 0)
 
     setattr(winput, 'KeyboardEvent', _Event)
     setattr(winput, 'MouseEvent', _Event)
@@ -411,6 +413,9 @@ def runtime_env():
     loader.load('keybinds._parsing', 'keybinds/_parsing.py')
     types_mod = loader.load('keybinds.types', 'keybinds/types.py')
     state_mod = loader.load('keybinds._state', 'keybinds/_state.py')
+    backend_singleton.current_state_snapshot = lambda: state_mod.InputState(
+        set(), set(), set(), set(), set(), set()
+    )
     loader.load('keybinds._bind_registry', 'keybinds/_bind_registry.py')
 
     loader.package_module('keybinds.diagnostics', 'keybinds/diagnostics')
