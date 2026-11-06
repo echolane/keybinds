@@ -32,12 +32,13 @@ class _CallbackDispatcher:
         self._q: "queue.SimpleQueue[Optional[Tuple[Callback, _DispatchTrace]]]" = queue.SimpleQueue()
         self._threads: List[threading.Thread] = []
         self._workers = max(1, int(workers))
+        self._lifecycle_lock = threading.RLock()
 
         self._async_loop: "Optional[asyncio.AbstractEventLoop]" = asyncio_loop
         self._on_async_error: Optional[Callable[[BaseException], None]] = on_async_error
         self._async: "Optional[_AsyncLoopThread]" = None  # lazy
 
-        self._stopped: bool = False
+        self._stopped: bool = True
         self.start()
 
     @property
@@ -49,44 +50,58 @@ class _CallbackDispatcher:
         return self._stopped
 
     def start(self) -> None:
-        if self.stopped or not self._threads:
+        with self._lifecycle_lock:
+            if not self._stopped:
+                return
             self._stopped = False
+            self._q = queue.SimpleQueue()
             self._threads = []
             for i in range(self._workers):
-                t = threading.Thread(target=self._worker, name="bind-worker-{0}".format(i), daemon=True)
+                t = threading.Thread(target=self._worker, args=(self._q,), name="bind-worker-{0}".format(i), daemon=True)
                 t.start()
                 self._threads.append(t)
 
     def stop(self) -> None:
-        if not self.stopped:
-            self._stopped = True
-            for _ in range(self._workers):
-                self._q.put(None)
+        with self._lifecycle_lock:
+            if not self._stopped:
+                self._stopped = True
+                stopped_queue = self._q
+                for _ in range(self._workers):
+                    stopped_queue.put(None)
 
-            self._threads.clear()
+                self._threads.clear()
 
-            if self._async is not None:
-                self._async.stop()
-                self._async = None
+                if self._async is not None:
+                    self._async.stop()
+                    self._async = None
 
     def _submit_awaitable(self, aw: Any, trace: Optional[_DispatchTrace] = None) -> None:
-        if self._async is None:
-            from ._async import _AsyncLoopThread
-            self._async = _AsyncLoopThread(self._async_loop, on_async_error=self._on_async_error)
         if trace is None:
             trace = _NULL_DISPATCH_TRACE
-        trace.async_scheduled()
-        self._async.submit(aw, trace=trace)
+        with self._lifecycle_lock:
+            if self._stopped:
+                close = getattr(aw, "close", None)
+                if callable(close):
+                    close()
+                return
+            if self._async is None:
+                from ._async import _AsyncLoopThread
+                self._async = _AsyncLoopThread(self._async_loop, on_async_error=self._on_async_error)
+            trace.async_scheduled()
+            self._async.submit(aw, trace=trace)
 
     def submit(self, fn: Callback, trace: Optional[_DispatchTrace] = None) -> None:
         if trace is None:
             trace = _NULL_DISPATCH_TRACE
-        trace.queued()
-        self._q.put((fn, trace))
+        with self._lifecycle_lock:
+            if self._stopped:
+                return
+            trace.queued()
+            self._q.put((fn, trace))
 
-    def _worker(self) -> None:
+    def _worker(self, work_queue: "queue.SimpleQueue[Optional[Tuple[Callback, _DispatchTrace]]]") -> None:
         while True:
-            item: Optional[Tuple[Callback, _DispatchTrace]] = self._q.get()
+            item: Optional[Tuple[Callback, _DispatchTrace]] = work_queue.get()
             if item is None:
                 return
             fn, trace = item

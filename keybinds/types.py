@@ -356,6 +356,9 @@ def _merge_soft(lhs: TBind, rhs: TBind) -> TBind:
     if rhs.focus != default_bind.focus:
         out = replace(out, focus=rhs.focus)
 
+    if rhs.restore_state_on_bind != default_bind.restore_state_on_bind:
+        out = replace(out, restore_state_on_bind=rhs.restore_state_on_bind)
+
     if isinstance(out, MouseBindConfig) and rhs.wheel_delta != default_bind.wheel_delta:
         out = replace(out, wheel_delta=rhs.wheel_delta)
 

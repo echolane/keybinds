@@ -31,6 +31,14 @@ def test_bind_config_soft_merge_only_applies_non_default_values(kb_env):
     assert merged.timing.repeat_interval_ms == 25
 
 
+def test_soft_merge_preserves_restore_state_option(kb_env):
+    BindConfig = kb_env.types.BindConfig
+    MouseBindConfig = kb_env.types.MouseBindConfig
+
+    assert (BindConfig() + BindConfig(restore_state_on_bind=True)).restore_state_on_bind
+    assert (MouseBindConfig() + MouseBindConfig(restore_state_on_bind=True)).restore_state_on_bind
+
+
 def test_bind_config_hard_merge_overwrites_with_defaults(kb_env):
     BindConfig = kb_env.types.BindConfig
     Trigger = kb_env.types.Trigger

@@ -579,6 +579,10 @@ class Hook:
         """Alias for set_default_hook(hook)."""
         set_default_hook(self)
 
+    def reinstall_hooks(self) -> None:
+        """Reinstall the process-wide keyboard and mouse hooks."""
+        _GlobalBackend.instance().reinstall_hooks()
+
     def join(self) -> None:
         """Block until the hook is stopped."""
         join(self)
@@ -586,7 +590,10 @@ class Hook:
     def start(self) -> None:
         """Start the hook (register to the backend, start callback dispatcher)."""
         if not self.started:
+            self._stop_event.clear()
             self._started = True
+            if self._dispatcher.stopped:
+                self._dispatcher.start()
             _GlobalBackend.instance().register(self)
             _GlobalBackend.instance().update_hooks()
             state = _GlobalBackend.instance().current_state_snapshot()
@@ -595,8 +602,6 @@ class Hook:
                     session._initial_pressed=set(state.pressed_keys_all or ()) if session.config.ignore_already_pressed else set()
                 else:
                     session._initial_mouse={b.name.lower() for b in (state.pressed_mouse_all or set())} if session.config.ignore_already_pressed else set()
-            if self._dispatcher.stopped:
-                self._dispatcher.start()
 
     def close(self) -> None:
         for session in tuple(self._capture_sessions):
@@ -608,7 +613,7 @@ class Hook:
         if self.started:
             self._started = False
             _GlobalBackend.instance().unregister(self)
-            self._dispatcher.stop()
+        self._dispatcher.stop()
         self._reset_runtime_states()
 
     def get_recent_diagnostics(self, limit: Optional[int] = None) -> List[DiagnosticRecord]:

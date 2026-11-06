@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gc
+import weakref
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +29,24 @@ def test_register_bind_rejects_rebinding_to_another_hook(kb_env):
 
     with pytest.raises(ValueError):
         kb_env.registry.register_bind(bind, object(), 'keyboard')
+
+
+def test_registry_releases_bind_entries_after_bind_is_collected(kb_env):
+    class BindStub:
+        pass
+
+    bind = BindStub()
+    bind.hook = None
+    bind_ref = weakref.ref(bind)
+    key = id(bind)
+    kb_env.registry.register_bind(bind, object(), 'keyboard')
+
+    del bind
+    gc.collect()
+
+    assert bind_ref() is None
+    assert key not in kb_env.registry._BIND_OWNER_HOOK
+    assert key not in kb_env.registry._BIND_KIND
 
 
 def test_add_and_remove_binds_keep_function_attributes_in_sync(kb_env):

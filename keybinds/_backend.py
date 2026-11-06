@@ -17,6 +17,7 @@ from ._constants import (
     WM_XBUTTONDOWN, WM_XBUTTONUP,
     MOUSE_BUTTON_ACTIONS,
     MOUSE_WHEEL_ACTIONS,
+    is_modifier_vk,
 )
 from .types import MouseButton
 from ._state import InputState
@@ -327,6 +328,27 @@ class _GlobalBackend:
             vk for vk in range(0x08, 0xFF)
             if vk not in mouse_vks and (int(user32.GetAsyncKeyState(vk)) & 0x8000)
         }
+
+        # When active bindings expose chord info, keep only keys relevant to them
+        # (modifiers or members of an active chord). Keys held at hook-install
+        # time that are unrelated to any chord (media/volume keys, remote-session
+        # ghosts, ...) would otherwise be locked into the pressed state for the
+        # whole session and poison every physical chord match. If no chord info is
+        # available (e.g. bind stubs without steps), fall back to legacy behaviour
+        # and seed everything currently reported as held.
+        relevant: Set[int] = set()
+        found_chords = False
+        for hook in self._alive_hooks():
+            for bind in hook._keyboard_snapshot:
+                for step in getattr(bind, "steps", ()):
+                    union = getattr(step, "allowed_union", ())
+                    if union:
+                        found_chords = True
+                    relevant.update(union)
+        if found_chords:
+            relevant.update(vk for vk in range(0x08, 0xFF) if is_modifier_vk(vk))
+            pressed &= relevant
+
         with self._state_lock:
             self._pressed_keys.clear()
             self._pressed_keys.update(pressed)

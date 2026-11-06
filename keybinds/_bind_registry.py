@@ -1,12 +1,31 @@
 from __future__ import annotations
 
+import weakref
 from typing import Any, Callable, Iterable, List, Dict, Optional
 
 Callback = Callable[..., Any]
 
-_BIND_OWNER_FUNC: Dict[int, Callback] = {}
-_BIND_OWNER_HOOK: Dict[int, Any] = {}
-_BIND_KIND: Dict[int, str] = {}
+_BIND_OWNER_FUNC: Dict[int, tuple] = {}
+_BIND_OWNER_HOOK: Dict[int, tuple] = {}
+_BIND_KIND: Dict[int, tuple] = {}
+
+
+def _weak_or_value(value: Any):
+    try:
+        return weakref.ref(value)
+    except TypeError:
+        return value
+
+
+def _resolve(value: Any) -> Any:
+    return value() if isinstance(value, weakref.ReferenceType) else value
+
+
+def _forget_bind(key: int, bind_ref: weakref.ReferenceType) -> None:
+    for registry in (_BIND_OWNER_FUNC, _BIND_OWNER_HOOK, _BIND_KIND):
+        entry = registry.get(key)
+        if entry is not None and entry[0] is bind_ref:
+            registry.pop(key, None)
 
 
 def register_bind(bind: Any, hook: Any, kind: str) -> None:
@@ -14,35 +33,52 @@ def register_bind(bind: Any, hook: Any, kind: str) -> None:
     if existing is not None and existing is not hook:
         raise ValueError("bind is already registered to a different hook")
     key = id(bind)
+    bind_ref = _weak_or_value(bind)
     bind.hook = hook
-    _BIND_OWNER_HOOK[key] = hook
-    _BIND_KIND[key] = kind
+    _BIND_OWNER_HOOK[key] = (bind_ref, _weak_or_value(hook))
+    _BIND_KIND[key] = (bind_ref, kind)
+    if isinstance(bind_ref, weakref.ReferenceType):
+        weakref.finalize(bind, _forget_bind, key, bind_ref)
 
 
 def register_decorated_bind(bind: Any, func: Callback) -> None:
-    _BIND_OWNER_FUNC[id(bind)] = func
+    key = id(bind)
+    bind_ref = _weak_or_value(bind)
+    _BIND_OWNER_FUNC[key] = (bind_ref, _weak_or_value(func))
+    if isinstance(bind_ref, weakref.ReferenceType):
+        weakref.finalize(bind, _forget_bind, key, bind_ref)
 
 
 def owner_func_for_bind(bind: Any) -> Optional[Callback]:
-    return _BIND_OWNER_FUNC.get(id(bind))
+    entry = _BIND_OWNER_FUNC.get(id(bind))
+    if entry is None or _resolve(entry[0]) is not bind:
+        return None
+    return _resolve(entry[1])
 
 
 def hook_for_bind(bind: Any) -> Any:
     owner = getattr(bind, "hook", None)
     if owner is not None:
         return owner
-    return _BIND_OWNER_HOOK.get(id(bind))
+    entry = _BIND_OWNER_HOOK.get(id(bind))
+    if entry is None or _resolve(entry[0]) is not bind:
+        return None
+    return _resolve(entry[1])
 
 
 def kind_for_bind(bind: Any) -> Optional[str]:
-    return _BIND_KIND.get(id(bind))
+    entry = _BIND_KIND.get(id(bind))
+    if entry is None or _resolve(entry[0]) is not bind:
+        return None
+    return entry[1]
 
 
 def unregister_bind(bind: Any) -> None:
     key = id(bind)
-    _BIND_OWNER_FUNC.pop(key, None)
-    _BIND_OWNER_HOOK.pop(key, None)
-    _BIND_KIND.pop(key, None)
+    for registry in (_BIND_OWNER_FUNC, _BIND_OWNER_HOOK, _BIND_KIND):
+        entry = registry.get(key)
+        if entry is not None and _resolve(entry[0]) is bind:
+            registry.pop(key, None)
     try:
         bind.hook = None
     except Exception:

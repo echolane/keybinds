@@ -51,7 +51,7 @@ def intercept(*args, **kwargs): return get_default_hook().intercept(*args, **kwa
 def read_text(*args, **kwargs): return get_default_hook().read_text(*args, **kwargs)
 def stream_text(*args, **kwargs): return get_default_hook().stream_text(*args, **kwargs)
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 __all__ = [
     "Trigger","SuppressPolicy","ChordPolicy","OrderPolicy","FocusPolicy","InjectedPolicy","TextBoundaryPolicy","TextBackspacePolicy","OsKeyRepeatPolicy","ReplacementPolicy",

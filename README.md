@@ -464,7 +464,7 @@ MIT License
 ## Third-party Components
 
 This project bundles a modified copy of [winput](https://github.com/Zuzu-Typ/winput) (originally by Zuzu_Typ, zlib/libpng license), extended so `keybinds` can detect injected keyboard and mouse hook events.
-The original license text is included in `keybinds/winput/LICENSE`.
+The original license text is included in [keybinds/winput/LICENSE](keybinds/winput/LICENSE).
 
 ## Contributing
 
